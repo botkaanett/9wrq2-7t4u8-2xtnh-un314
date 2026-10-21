@@ -328,8 +328,9 @@ function goalCard(g,sibs,i,isNext,a){
 function viewGoals(){
   var a=allocate();
   if(ui.gl!=="all"&&!state.lists.some(function(l){return l.id===ui.gl;}))ui.gl="all";
+  var sn=0,sf=0;state.lists.forEach(function(l){sn+=a.lists[l.id].need;sf+=a.lists[l.id].funded;});
   var h='<div class="eyebrow">Saving for</div><h1>Wishlist</h1>';
-  h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved in total</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick which list it is for. It fills that list top to bottom. Savings with no list flow through your lists in order.</div></div>';
+  h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved in total</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="grid3" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div><div class="v">'+huf(sn)+'</div><div class="l">Total, all lists</div></div><div><div class="v saving">'+huf(sf)+'</div><div class="l">Covered so far</div></div><div><div class="v">'+huf(Math.max(0,sn-sf))+'</div><div class="l">Still to save</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick which list it is for. It fills that list top to bottom. Savings with no list flow through your lists in order.</div></div>';
   h+='<div class="gtabs"><button data-gl="all" class="'+(ui.gl==="all"?"on":"")+'">All</button>'+state.lists.map(function(l){return '<button data-gl="'+l.id+'" class="'+(ui.gl===l.id?"on":"")+'">'+esc(l.name)+'</button>';}).join("")+'</div>';
   var shown=ui.gl==="all"?state.lists:state.lists.filter(function(l){return l.id===ui.gl;});
   var any=false;
@@ -339,13 +340,15 @@ function viewGoals(){
     any=true;
     var open=sibs.filter(function(g){return !g.done;}).length;
     h+='<div class="lsec">'+esc(l.name)+'</div>';
-    h+='<div class="muted" style="font-size:13px;margin:2px 4px 0">'+(st.saved?'Saved for this list '+huf(st.saved)+' · ':'')+(open?huf(st.need-st.funded)+' still to save for '+open+' item'+(open===1?'':'s'):(sibs.length?'All bought':'No items yet'))+'</div>';
+    h+='<div class="muted" style="font-size:13px;margin:2px 4px 0">'+[open?'Total '+huf(st.need):null,st.saved?'Saved for this list '+huf(st.saved):null,open?huf(st.need-st.funded)+' still to save for '+open+' item'+(open===1?'':'s'):(sibs.length?'All bought':'No items yet')].filter(Boolean).join(' · ')+'</div>';
     if(!sibs.length){h+='<div class="card empty">Nothing here yet. Tap + to add an item.</div>';return;}
     var fo=sibs.findIndex(function(g){return !g.done;});
     sibs.forEach(function(g,i){h+=goalCard(g,sibs,i,i===fo,a);});
   });
   if(!any)h+='<div class="card empty">Add something you want to buy with the + button.</div>';
   h+='<button class="btn sec" data-act="lists" style="margin-top:16px">Manage lists</button>';
+  var scope=ui.gl==="all"?state.goals:state.goals.filter(function(g){return g.listId===ui.gl;});
+  if(scope.length)h+='<button class="btn danger" data-act="wl-clear" style="margin-top:8px">'+(ui.gl==="all"?"Delete all wishlist items":"Delete all items in “"+esc(listName(ui.gl))+"”")+'</button>';
   return h;
 }
 
@@ -498,6 +501,15 @@ app.addEventListener("click",function(e){
   if(act==="backup"){download("money-backup-"+today()+".json",JSON.stringify(state),"application/json");return;}
   if(act==="csv"){exportCsv();return;}
   if(act==="lists"){listsSheet();return;}
+  if(act==="wl-clear"){
+    var all=ui.gl==="all",sc=all?state.goals:state.goals.filter(function(g){return g.listId===ui.gl;});
+    if(!sc.length)return;
+    if(confirm("Delete "+(all?"all "+sc.length+" wishlist items":sc.length+" item"+(sc.length===1?"":"s")+" in “"+listName(ui.gl)+"”")+"? This can't be undone. Your savings and transactions are not affected.")){
+      state.goals=state.goals.filter(function(g){return !(all||g.listId===ui.gl);});
+      save();render();
+    }
+    return;
+  }
   if(act==="wl-paste"){openSheet('<h2>Import wishlist JSON</h2><label>Paste the JSON here</label><textarea id="wl_text" rows="10" style="font:13px/1.4 ui-monospace,Menlo,monospace" placeholder=\'{"items":[{"name":"…","price":89990,"url":"…","image":"…"}]}\'></textarea><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="wl_go">Import</button></div>');return;}
   if(act==="wl-file"){var wf=document.getElementById("wlFile");wf.onchange=function(){var f=wf.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(){importWishlist(String(rd.result));wf.value="";};rd.readAsText(f);};wf.click();return;}
   if(act==="restore"){var f=document.getElementById("restoreFile");f.onchange=function(){restore(f.files[0]);};f.click();return;}
