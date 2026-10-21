@@ -86,6 +86,12 @@ input[type=date]{min-height:46px}
 .gtabs button{flex:none;color:var(--muted);font-weight:600;padding:6px 0;border-bottom:2px solid transparent}
 .gtabs button.on{color:var(--text);border-bottom-color:var(--accent)}
 .lsec{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:22px 4px 0}
+.garden{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.plant{background:var(--bg);border-radius:14px;padding:10px 8px 12px;text-align:center;cursor:pointer}
+.plant svg{display:block;margin:0 auto}
+.plant .pn{font-weight:650;font-size:14px;margin-top:4px}
+.plant .pa{font-size:12px;color:var(--muted)}
+.plant .bar{margin:8px 10px 0}
 .frow{display:flex;justify-content:space-between;align-items:center;width:100%;padding:14px 0;border-bottom:1px solid var(--line);text-align:left}
 .lrow{display:grid;grid-template-columns:1fr 36px 36px 36px;gap:8px;margin-bottom:8px;align-items:center}
 .splitrow{display:grid;grid-template-columns:1fr 110px 36px;gap:8px;margin-bottom:8px;align-items:center}
@@ -122,7 +128,7 @@ var ui={tab:"overview",month:ym(new Date()),catFilter:null,gl:"all"};
 
 function load(){
   try{var raw=localStorage.getItem(KEY);if(raw){var d=JSON.parse(raw);state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;}}catch(e){}
-  var needs=(state.migr||0)<3&&(state.tx.length||state.goals.length||state.lists.length);
+  var needs=(state.migr||0)<4&&(state.tx.length||state.goals.length||state.lists.length);
   normalize();if(needs)save();
 }
 function save(){
@@ -169,9 +175,17 @@ function normalize(){
   // savings pots: plain money pots with no items (presents, health, travel, ...)
   if((state.migr||0)<3){
     if(!state.lists.some(function(l){return l.pot;})){
-      [["p_presents","Presents"],["p_health","Health"],["p_travel","Travel & leisure"],["p_clothing","Clothing & shopping"],["p_revolut","Revolut"],["p_misc","Miscellaneous"]].forEach(function(x){state.lists.push({id:x[0],name:x[1],pot:true});});
+      [["p_moving","Moving"],["p_presents","Presents"],["p_health","Health"],["p_travel","Travel & leisure"],["p_clothing","Clothing & shopping"],["p_revolut","Revolut"],["p_misc","Miscellaneous"]].forEach(function(x){state.lists.push({id:x[0],name:x[1],pot:true});});
     }
     state.migr=3;
+  }
+  if((state.migr||0)<4){
+    if(!state.lists.some(function(l){return l.pot&&(l.id==="p_moving"||l.name.toLowerCase()==="moving");})){
+      var fp0=state.lists.findIndex(function(l){return l.pot;});
+      var mv0={id:"p_moving",name:"Moving",pot:true};
+      if(fp0<0)state.lists.push(mv0);else state.lists.splice(fp0,0,mv0);
+    }
+    state.migr=4;
   }
   var ids=state.lists.map(function(l){return l.id;}),wl=wishLists(),wids=wl.map(function(l){return l.id;}),fb=wl[wl.length-1].id;
   state.goals.forEach(function(g){if(wids.indexOf(g.listId)<0)g.listId=fb;});
@@ -271,9 +285,14 @@ function viewOverview(){
   var ap=allocate(),pl=potLists();
   if(pl.length){
     var ptot=0;pl.forEach(function(l){ptot+=ap.pots[l.id]||0;});
-    h+='<div class="card"><div class="row spread"><div class="eyebrow">Savings pots</div><strong>'+huf(ptot)+'</strong></div>';
-    pl.forEach(function(l){var b=ap.pots[l.id]||0;h+='<div class="row spread" style="margin-top:10px"><span>'+esc(l.name)+'</span><span class="'+(b<0?"expense":"")+'" style="font-weight:600">'+huf(b)+'</span></div>';});
-    h+='<div class="muted" style="font-size:13px;margin-top:12px">Balance of each pot: everything saved into it, minus expenses paid from it.</div></div>';
+    h+='<div class="card"><div class="row spread"><div class="eyebrow">Garden</div><strong>'+huf(ptot)+'</strong></div><div class="garden">';
+    pl.forEach(function(l){
+      var bal=ap.pots[l.id]||0,bud=l.budget||0,pr=bud>0?bal/bud:0;
+      h+='<div class="plant" data-plant="'+l.id+'">'+plantSvg(pr,92)+'<div class="pn">'+esc(l.name)+'</div><div class="pa">'+(bud>0?huf(bal)+' / '+huf(bud):huf(bal)+' · set a budget')+'</div>';
+      if(bud>0)h+='<div class="bar"><i style="width:'+Math.min(100,Math.max(0,pr*100))+'%;background:var(--income)"></i></div><div class="pa" style="margin-top:4px">'+(pr>=1?'In bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%')+'</div>';
+      h+='</div>';
+    });
+    h+='</div><div class="muted" style="font-size:13px;margin-top:12px">Tap a plant to set its budget. Each plant grows as its balance reaches the budget and flowers when it gets there. Balance = saved into it minus expenses paid from it.</div></div>';
   }
   // wishlist teaser
   var a=allocate();
@@ -360,7 +379,7 @@ function viewGoals(){
   if(ui.gl!=="all"&&!wishLists().some(function(l){return l.id===ui.gl;}))ui.gl="all";
   var sn=0,sf=0;wishLists().forEach(function(l){sn+=a.lists[l.id].need;sf+=a.lists[l.id].funded;});
   var h='<div class="eyebrow">Saving for</div><h1>Wishlist</h1>';
-  h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved for wishlists</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="grid3" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div><div class="v">'+huf(sn)+'</div><div class="l">Total, all lists</div></div><div><div class="v saving">'+huf(sf)+'</div><div class="l">Covered so far</div></div><div><div class="v">'+huf(Math.max(0,sn-sf))+'</div><div class="l">Still to save</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick a wishlist or a savings pot. Each wishlist can also be funded from pots (tap “Funded from”). Savings with no wishlist flow through your wishlists in order.</div></div>';
+  h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved for wishlists</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="grid3" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div><div class="v">'+huf(sn)+'</div><div class="l">Total, all lists</div></div><div><div class="v saving">'+huf(sf)+'</div><div class="l">Covered so far</div></div><div><div class="v">'+huf(Math.max(0,sn-sf))+'</div><div class="l">Still to save</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick a wishlist or a plant in your garden. Each wishlist can also be funded from plants (tap “Funded from”). Savings with no wishlist flow through your wishlists in order.</div></div>';
   h+='<div class="gtabs"><button data-gl="all" class="'+(ui.gl==="all"?"on":"")+'">All</button>'+wishLists().map(function(l){return '<button data-gl="'+l.id+'" class="'+(ui.gl===l.id?"on":"")+'">'+esc(l.name)+'</button>';}).join("")+'</div>';
   var shown=ui.gl==="all"?wishLists():wishLists().filter(function(l){return l.id===ui.gl;});
   var any=false;
@@ -372,7 +391,7 @@ function viewGoals(){
     h+='<div class="lsec">'+esc(l.name)+'</div>';
     h+='<div class="muted" style="font-size:13px;margin:2px 4px 0">'+[open?'Total '+huf(st.need):null,st.saved?'Saved for this list '+huf(st.saved):null,open?huf(st.need-st.funded)+' still to save for '+open+' item'+(open===1?'':'s'):(sibs.length?'All bought':'No items yet')].filter(Boolean).join(' · ')+'</div>';
     var fl=(l.pots||[]).map(listName).filter(Boolean);
-    h+='<div style="margin:4px 4px 0"><button class="golink" style="margin:0" data-lfund="'+l.id+'">Funded from: '+(fl.length?esc(fl.join(", ")):"no savings pot")+' ›</button></div>';
+    h+='<div style="margin:4px 4px 0"><button class="golink" style="margin:0" data-lfund="'+l.id+'">Funded from: '+(fl.length?esc(fl.join(", ")):"no plant")+' ›</button></div>';
     if(!sibs.length){h+='<div class="card empty">Nothing here yet. Tap + to add an item.</div>';return;}
     var fo=sibs.findIndex(function(g){return !g.done;});
     sibs.forEach(function(g,i){h+=goalCard(g,sibs,i,i===fo,a);});
@@ -445,11 +464,11 @@ function drawTxSheet(){
   }
   if(d.type==="saving"){
     var opt=function(l){return '<option value="'+l.id+'"'+(d.listId===l.id?" selected":"")+'>'+esc(l.name)+'</option>';};
-    h+='<label>Save for</label><select id="f_for"><option value="">Any wishlist (general)</option><optgroup label="Wishlists">'+wishLists().map(opt).join("")+'</optgroup><optgroup label="Savings pots">'+potLists().map(opt).join("")+'</optgroup></select>';
+    h+='<label>Save for</label><select id="f_for"><option value="">Any wishlist (general)</option><optgroup label="Wishlists">'+wishLists().map(opt).join("")+'</optgroup><optgroup label="Garden">'+potLists().map(opt).join("")+'</optgroup></select>';
   }
   if(d.type==="expense"&&potLists().length){
     var bal=allocate().pots;
-    h+='<label>Paid from savings (optional)</label><select id="f_from"><option value="">Not from a savings pot</option>'+potLists().map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
+    h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potLists().map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
   }
   h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'">';
   var places=[];state.tx.forEach(function(t){if(t.place&&places.indexOf(t.place)<0)places.push(t.place);});
@@ -471,6 +490,45 @@ function readTxForm(){
   draft.note=document.getElementById("f_note").value.trim();
 }
 
+// A growing plant: the closer a pot's balance gets to its budget, the taller and leafier it grows. It flowers at 100%.
+function plantSvg(p,w){
+  p=Math.max(0,Math.min(1,p||0));
+  var sh=14+64*p,top=100-sh,n=1+Math.round(p*5),i,out='';
+  out+='<path d="M60 101 Q'+(60+(p>0.5?3:-2))+' '+(100-sh/2)+' 60 '+top.toFixed(1)+'" fill="none" stroke="#3b8f5a" stroke-width="3" stroke-linecap="round"/>';
+  for(i=0;i<n;i++){
+    var y=100-(i+1)*(sh/(n+0.6)),sz=6+p*5+(n-i)*0.9,left=(i%2===0),col=(i%2===0)?"#4cc27a":"#36a05f";
+    var lx=(left?60-sz*0.95:60+sz*0.95).toFixed(1),ly=(y-(left?0:3)).toFixed(1),rot=left?-32:32;
+    out+='<ellipse cx="'+lx+'" cy="'+ly+'" rx="'+sz.toFixed(1)+'" ry="'+(sz*0.5).toFixed(1)+'" transform="rotate('+rot+' '+lx+' '+ly+')" fill="'+col+'"/>';
+    if(p>0.35&&i<n-1){
+      var lx2=(left?60+sz*0.95:60-sz*0.95).toFixed(1),ly2=(y+4).toFixed(1);
+      out+='<ellipse cx="'+lx2+'" cy="'+ly2+'" rx="'+(sz*0.85).toFixed(1)+'" ry="'+(sz*0.43).toFixed(1)+'" transform="rotate('+(-rot)+' '+lx2+' '+ly2+')" fill="'+(col==="#4cc27a"?"#36a05f":"#4cc27a")+'"/>';
+    }
+  }
+  out+='<ellipse cx="60" cy="'+(top-3).toFixed(1)+'" rx="4" ry="'+(5+p*4).toFixed(1)+'" fill="#4cc27a"/>';
+  var spots=[[60,top-8],[60-22,top+16],[60+22,top+10]];
+  if(p>=1){
+    var cols=["#f06292","#ff8a65","#ba68c8"];
+    spots.forEach(function(sp,k){
+      var k2;for(k2=0;k2<5;k2++){var a=(k2*72-90)*Math.PI/180;out+='<circle cx="'+(sp[0]+5.2*Math.cos(a)).toFixed(1)+'" cy="'+(sp[1]+5.2*Math.sin(a)).toFixed(1)+'" r="4.4" fill="'+cols[k]+'"/>';}
+      out+='<circle cx="'+sp[0]+'" cy="'+sp[1].toFixed(1)+'" r="3.2" fill="#ffd54f"/>';
+    });
+  }else if(p>=0.8){
+    spots.forEach(function(sp){out+='<circle cx="'+sp[0]+'" cy="'+sp[1].toFixed(1)+'" r="4" fill="#f8bbd0"/><path d="M'+(sp[0]-3.5)+' '+(sp[1]+3).toFixed(1)+'q3.5 4 7 0" fill="none" stroke="#3b8f5a" stroke-width="1.6" stroke-linecap="round"/>';});
+  }
+  var pot='<path d="M36 112h48l-5 24q-.5 2-2.5 2H43.5q-2 0-2.5-2z" fill="#c4704c"/><rect x="30" y="100" width="60" height="13" rx="4" fill="#d98660"/><ellipse cx="60" cy="100.5" rx="26" ry="3" fill="#5a3d2e"/>';
+  var ww=w||92;
+  return '<svg viewBox="0 0 120 140" width="'+ww+'" height="'+(ww*140/120).toFixed(0)+'" role="img" aria-label="Plant">'+pot+out+'</svg>';
+}
+function plantSheet(id){
+  var l=state.lists.filter(function(x){return x.id===id&&x.pot;})[0];if(!l)return;
+  var bal=allocate().pots[id]||0,b=l.budget||0,p=b>0?bal/b:0;
+  var h='<h2>'+esc(l.name)+'</h2><div style="text-align:center">'+plantSvg(p,140)+'</div>';
+  h+='<div style="text-align:center;margin-bottom:4px"><strong>'+huf(bal)+'</strong>'+(b>0?' <span class="muted">of '+huf(b)+' · '+(p>=1?'in bloom 🌸':Math.min(99,Math.floor(p*100))+'%')+'</span>':'')+'</div>';
+  h+='<label>Budget (Ft)</label><input id="pl_budget" type="number" inputmode="decimal" min="0" step="1" value="'+(b>0?b:'')+'" placeholder="e.g. 100000">';
+  h+='<div class="muted" style="font-size:13px;margin-top:8px">The plant grows as the balance reaches this budget, and flowers once it is reached.</div>';
+  h+='<div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="pl_save" data-pid="'+id+'">Save</button></div>';
+  openSheet(h);
+}
 function listRows(pot){
   var h='',sib=state.lists.filter(function(x){return !!x.pot===pot;});
   state.lists.forEach(function(l,i){
@@ -481,18 +539,18 @@ function listRows(pot){
   return h;
 }
 function listsSheet(){
-  var h='<h2>Lists</h2><div class="muted" style="font-size:13px;margin-bottom:12px">Wishlists hold items you want to buy. Savings pots are plain pots of money with no items. Savings with no wishlist selected flow through the wishlists from top to bottom.</div>';
+  var h='<h2>Lists</h2><div class="muted" style="font-size:13px;margin-bottom:12px">Wishlists hold items you want to buy. Plants in your garden are savings pots with no items. Savings with no wishlist selected flow through the wishlists from top to bottom.</div>';
   h+='<div class="lsec" style="margin:0 0 8px">Wishlists</div>'+listRows(false);
   h+='<div class="row" style="margin-bottom:6px"><input id="l_new" type="text" maxlength="40" placeholder="New wishlist"><button class="btn" id="l_add" style="width:auto;padding:13px 18px">Add</button></div>';
-  h+='<div class="lsec" style="margin:18px 0 8px">Savings pots</div>'+listRows(true);
-  h+='<div class="row"><input id="p_new" type="text" maxlength="40" placeholder="New savings pot"><button class="btn" id="p_add" style="width:auto;padding:13px 18px">Add</button></div>';
+  h+='<div class="lsec" style="margin:18px 0 8px">Garden (savings plants)</div>'+listRows(true);
+  h+='<div class="row"><input id="p_new" type="text" maxlength="40" placeholder="New plant"><button class="btn" id="p_add" style="width:auto;padding:13px 18px">Add</button></div>';
   h+='<div class="actions"><button class="btn" id="f_cancel">Done</button></div>';
   openSheet(h);
 }
 function delList(i){
   var l=state.lists[i];if(!l)return;
   if(l.pot){
-    if(!confirm("Delete the savings pot “"+l.name+"”? Money saved in it will count as general savings."))return;
+    if(!confirm("Remove the plant “"+l.name+"”? Money saved in it will count as general savings."))return;
     state.tx.forEach(function(t){if(t.listId===l.id)delete t.listId;if(t.fromPot===l.id)delete t.fromPot;});
     state.lists.forEach(function(x){if(x.pots)x.pots=x.pots.filter(function(id){return id!==l.id;});});
     state.lists.splice(i,1);save();listsSheet();return;
@@ -512,8 +570,8 @@ var fdraft=null;
 function fundSheet(id){
   if(id){var l=state.lists.filter(function(x){return x.id===id;})[0];if(!l)return;fdraft={id:id,pots:(l.pots||[]).slice()};}
   var l2=state.lists.filter(function(x){return x.id===fdraft.id;})[0],bal=allocate().pots,pl=potLists();
-  var h='<h2>Fund “'+esc(l2.name)+'” from</h2><div class="muted" style="font-size:13px;margin-bottom:6px">Money in the pots you tick counts toward this wishlist, after anything saved directly for it. A pot shared by two wishlists funds them from top to bottom.</div>';
-  if(!pl.length)h+='<div class="empty">No savings pots yet. Add one under Manage lists.</div>';
+  var h='<h2>Fund “'+esc(l2.name)+'” from</h2><div class="muted" style="font-size:13px;margin-bottom:6px">Money in the plants you tick counts toward this wishlist, after anything saved directly for it. A plant shared by two wishlists funds them from top to bottom.</div>';
+  if(!pl.length)h+='<div class="empty">No plants yet. Add one under Manage lists.</div>';
   pl.forEach(function(p){var on=fdraft.pots.indexOf(p.id)>=0;h+='<button class="frow" data-ftog="'+p.id+'"><span>'+esc(p.name)+' <span class="muted">('+huf(bal[p.id]||0)+')</span></span><span style="color:var(--accent);font-weight:700">'+(on?"✓":"")+'</span></button>';});
   h+='<div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="f_fsave">Save</button></div>';
   openSheet(h);
@@ -557,13 +615,14 @@ document.getElementById("fab").addEventListener("click",function(){
 });
 
 app.addEventListener("click",function(e){
-  var t=e.target.closest("[data-act],[data-edit],[data-editgoal],[data-up],[data-down],[data-buy],[data-cat],[data-clearcat],[data-gl],[data-lfund]");
+  var t=e.target.closest("[data-act],[data-edit],[data-editgoal],[data-up],[data-down],[data-buy],[data-cat],[data-clearcat],[data-gl],[data-lfund],[data-plant]");
   if(!t||e.target.closest("a"))return;
   var act=t.dataset.act;
   if(t.dataset.cat){ui.catFilter=t.dataset.cat;ui.tab="tx";render();window.scrollTo(0,0);return;}
   if(t.dataset.clearcat){ui.catFilter=null;render();return;}
   if(t.dataset.gl){ui.gl=t.dataset.gl;render();return;}
   if(t.dataset.lfund){fundSheet(t.dataset.lfund);return;}
+  if(t.dataset.plant){plantSheet(t.dataset.plant);return;}
   if(act==="prev"){ui.month=shiftMonth(ui.month,-1);render();return;}
   if(act==="next"){ui.month=shiftMonth(ui.month,1);render();return;}
   if(act==="backup"){download("money-backup-"+today()+".json",JSON.stringify(state),"application/json");return;}
@@ -657,6 +716,7 @@ sheet.addEventListener("click",function(e){
   if(b.dataset.ldel!==undefined){delList(+b.dataset.ldel);return;}
   if(b.dataset.ftog){var fi=fdraft.pots.indexOf(b.dataset.ftog);if(fi<0)fdraft.pots.push(b.dataset.ftog);else fdraft.pots.splice(fi,1);fundSheet(null);return;}
   if(b.id==="f_fsave"){var fl2=state.lists.filter(function(x){return x.id===fdraft.id;})[0];if(fl2){fl2.pots=fdraft.pots;save();}closeSheet();return;}
+  if(b.id==="pl_save"){var pl0=state.lists.filter(function(x){return x.id===b.dataset.pid;})[0];if(pl0){pl0.budget=Math.max(0,parseFloat(document.getElementById("pl_budget").value)||0);save();}closeSheet();return;}
   if(b.id==="p_add"){var pi=document.getElementById("p_new"),pn=pi.value.trim();if(!pn)return;state.lists.push({id:uid(),name:pn.slice(0,40),pot:true});save();listsSheet();return;}
   if(b.id==="l_add"){var ni=document.getElementById("l_new"),nm=ni.value.trim();if(!nm)return;state.lists.push({id:uid(),name:nm.slice(0,40)});save();listsSheet();return;}
   if(b.id==="wl_go"){if(importWishlist(document.getElementById("wl_text").value))closeSheet();return;}
