@@ -93,6 +93,10 @@ input[type=date]{min-height:46px}
 .plant .pa{font-size:12px;color:var(--muted)}
 .plant .bar{margin:8px 10px 0}
 .potcard{cursor:pointer}
+[data-sort]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+[data-sort] img{-webkit-user-drag:none;pointer-events:none}
+.sorting{transition:transform .16s ease}
+.dragging{position:relative;z-index:8;box-shadow:0 14px 30px rgba(0,0,0,.28);transition:box-shadow .15s}
 .tx.planned .t,.tx.planned .a,.tx.planned .dot{opacity:.6}
 .tx.planned .s{font-style:italic}
 .mrow{display:grid;grid-template-columns:.9fr 1.1fr 1.1fr 1.1fr;gap:6px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
@@ -131,7 +135,7 @@ var ICON={};
 Object.keys(CATS).forEach(function(k){CATS[k].forEach(function(c){ICON[c[1]]=c[0];});});
 
 var state={tx:[],goals:[],lists:[]};
-var ui={tab:"overview",month:ym(new Date()),catFilter:null,gl:"all",pot:null};
+var ui={tab:"overview",month:ym(new Date()),catFilter:null,gl:"all",pot:null,noClick:0};
 
 function load(){
   try{var raw=localStorage.getItem(KEY);if(raw){var d=JSON.parse(raw);state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;}}catch(e){}
@@ -395,7 +399,7 @@ function nextGoal(){
 }
 function goalCard(g,sibs,i,isNext,a){
   var it=a.items[g.id],h='';
-  h+='<div class="card '+(g.done?"done":"")+'"><div class="goal">';
+  h+='<div class="card '+(g.done?"done":"")+'" data-sort="g:'+g.listId+'" data-sid="'+g.id+'"><div class="goal">';
   h+='<div class="img" data-editgoal="'+g.id+'">'+(g.img?'<img alt="" src="'+esc(g.img)+'" onerror="this.parentNode.textContent=\'🎁\'">':"🎁")+'</div>';
   h+='<div class="body" data-editgoal="'+g.id+'">'+(isNext?'<div class="next">NEXT UP</div>':"")+'<div class="name">'+(g.done?"✓ ":"")+esc(g.name)+'</div>';
   if(g.price>0)h+='<div class="num">'+huf(it.funded)+' of '+huf(g.price)+(g.done?"":' · '+huf(g.price-it.funded)+' to go')+'</div>';
@@ -413,7 +417,7 @@ function viewGoals(){
   if(ui.gl!=="all"&&!wishLists().some(function(l){return l.id===ui.gl;}))ui.gl="all";
   var sn=0,sf=0;wishLists().forEach(function(l){sn+=a.lists[l.id].need;sf+=a.lists[l.id].funded;});
   var h='<div class="eyebrow">Saving for</div><h1>Wishlist</h1>'+planToggle();
-  h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved for wishlists</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="grid3" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div><div class="v">'+huf(sn)+'</div><div class="l">Total, all lists</div></div><div><div class="v saving">'+huf(sf)+'</div><div class="l">Covered so far</div></div><div><div class="v">'+huf(Math.max(0,sn-sf))+'</div><div class="l">Still to save</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick a wishlist or a plant in your garden. Each wishlist can also be funded from plants (tap “Funded from”). Savings with no wishlist flow through your wishlists in order.</div></div>';
+  h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved for wishlists</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="grid3" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div><div class="v">'+huf(sn)+'</div><div class="l">Total, all lists</div></div><div><div class="v saving">'+huf(sf)+'</div><div class="l">Covered so far</div></div><div><div class="v">'+huf(Math.max(0,sn-sf))+'</div><div class="l">Still to save</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick a wishlist or a plant in your garden. Each wishlist can also be funded from plants (tap “Funded from”). Savings with no wishlist flow through your wishlists in order. Press and hold an item, then drag it to change the order.</div></div>';
   h+='<div class="gtabs"><button data-gl="all" class="'+(ui.gl==="all"?"on":"")+'">All</button>'+wishLists().map(function(l){return '<button data-gl="'+l.id+'" class="'+(ui.gl===l.id?"on":"")+'">'+esc(l.name)+'</button>';}).join("")+'</div>';
   var shown=ui.gl==="all"?wishLists():wishLists().filter(function(l){return l.id===ui.gl;});
   var any=false;
@@ -479,12 +483,13 @@ function viewSavings(){
   if(!pl.length)h+='<div class="card empty">No plants in your garden. Add one below.</div>';
   rows.forEach(function(r){
     var l=r.l,st=r.st,bud=l.budget||0,pr=bud>0?st.bal/bud:0;
-    h+='<div class="card potcard" data-pot="'+l.id+'"><div class="row" style="align-items:center">'+plantSvg(pr,56)+'<div style="flex:1;min-width:0"><div class="row spread"><strong>'+esc(l.name)+'</strong><span class="'+(st.bal<0?"expense":"")+'" style="font-weight:650">'+huf(st.bal)+'</span></div>';
+    h+='<div class="card potcard" data-pot="'+l.id+'" data-sort="pots" data-sid="'+l.id+'"><div class="row" style="align-items:center">'+plantSvg(pr,56)+'<div style="flex:1;min-width:0"><div class="row spread"><strong>'+esc(l.name)+'</strong><span class="'+(st.bal<0?"expense":"")+'" style="font-weight:650">'+huf(st.bal)+'</span></div>';
     h+='<div class="muted" style="font-size:13px;margin:2px 0 6px">'+(bud>0?'Budget '+huf(bud)+' · '+(pr>=1?'in bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%'):'No budget set')+'</div>';
     if(bud>0)h+='<div class="bar"><i style="width:'+Math.min(100,Math.max(0,pr*100))+'%;background:var(--income)"></i></div>';
     h+='<div class="muted" style="font-size:12px;margin-top:6px">Saved '+huf(st.dep)+' · Used '+huf(st.wd+st.wishUsed)+'</div></div></div></div>';
   });
   var gen=a.totalSaved;
+  if(rows.length>1)h+='<div class="muted" style="font-size:12px;margin:-2px 4px 8px">Press and hold a plant, then drag it to change the order.</div>';
   h+='<button class="btn sec" data-act="newplant" style="margin-top:4px">+ New plant</button>';
   h+='<div class="card"><div class="row spread"><span class="muted">Saved for wishlists (not in a plant)</span><strong>'+huf(gen)+'</strong></div></div>';
   var dn=donePots();
@@ -775,6 +780,7 @@ document.getElementById("fab").addEventListener("click",function(){
 });
 
 app.addEventListener("click",function(e){
+  if(Date.now()<ui.noClick){e.preventDefault();return;}
   var t=e.target.closest("[data-act],[data-edit],[data-editgoal],[data-up],[data-down],[data-buy],[data-cat],[data-clearcat],[data-gl],[data-lfund],[data-plant],[data-pot],[data-potback]");
   if(!t||e.target.closest("a"))return;
   var act=t.dataset.act;
@@ -1007,6 +1013,93 @@ function restore(file){
     x.fillStyle="#fff";x.font="bold 110px -apple-system,sans-serif";x.textAlign="center";x.textBaseline="middle";x.fillText("Ft",90,98);
     var l=document.createElement("link");l.rel="apple-touch-icon";l.href=c.toDataURL("image/png");document.head.appendChild(l);
   }catch(e){}
+})();
+
+/* ---------- press-and-hold drag & drop (wishlist items within a list, plants in the garden) ---------- */
+function reorderGoals(listId,ids){
+  var slots=[],map={};
+  state.goals.forEach(function(g,i){map[g.id]=g;if(g.listId===listId)slots.push(i);});
+  if(slots.length!==ids.length)return;
+  ids.forEach(function(id,k){if(map[id])state.goals[slots[k]]=map[id];});
+}
+function reorderPots(ids){
+  var slots=[],map={};
+  state.lists.forEach(function(l,i){map[l.id]=l;if(l.pot&&!l.done)slots.push(i);});
+  if(slots.length!==ids.length)return;
+  ids.forEach(function(id,k){if(map[id])state.lists[slots[k]]=map[id];});
+}
+(function(){
+  var S=null,HOLD=450;
+  function layout(){
+    var dy=(S.cy+window.scrollY)-(S.sy+S.sScroll);
+    var cen=S.tops[S.idx]+S.hs[S.idx]/2+dy,n=0;
+    S.tops.forEach(function(t,i){if(i!==S.idx&&t+S.hs[i]/2<cen)n++;});
+    S.to=n;
+    S.els.forEach(function(el,i){
+      if(i===S.idx){el.style.transform="translateY("+dy+"px) scale(1.02)";return;}
+      var shift=0;
+      if(i>S.idx&&i<=n)shift=-(S.hs[S.idx]+12);
+      else if(i<S.idx&&i>=n)shift=S.hs[S.idx]+12;
+      el.style.transform=shift?"translateY("+shift+"px)":"";
+    });
+  }
+  function frame(){
+    if(!S||!S.active)return;
+    // only auto-scroll once the finger has actually been dragged toward an edge (not just held down near one)
+    if(S.cy<90&&S.cy<S.ay-20)window.scrollBy(0,-12);else if(S.cy>window.innerHeight-150&&S.cy>S.ay+20)window.scrollBy(0,12);
+    layout();
+    S.raf=requestAnimationFrame(frame);
+  }
+  function activate(){
+    S.timer=null;
+    S.els=[].slice.call(app.querySelectorAll('[data-sort="'+S.group+'"]'));
+    S.idx=S.els.indexOf(S.el);
+    if(S.idx<0||S.els.length<2){S=null;return;}
+    S.sScroll=window.scrollY;S.ay=S.cy;
+    S.tops=S.els.map(function(e){return e.getBoundingClientRect().top+window.scrollY;});
+    S.hs=S.els.map(function(e){return e.getBoundingClientRect().height;});
+    S.to=S.idx;S.active=true;
+    S.els.forEach(function(e,i){e.classList.add(i===S.idx?"dragging":"sorting");});
+    try{if(navigator.vibrate)navigator.vibrate(12);}catch(x){}
+    S.raf=requestAnimationFrame(frame);
+  }
+  function clean(){
+    if(!S)return;
+    if(S.timer)clearTimeout(S.timer);
+    if(S.raf)cancelAnimationFrame(S.raf);
+    (S.els||[]).forEach(function(e){e.classList.remove("dragging","sorting");e.style.transform="";});
+  }
+  app.addEventListener("pointerdown",function(e){
+    if(S||(e.pointerType==="mouse"&&e.button!==0))return;
+    var el=e.target.closest("[data-sort]");
+    if(!el||e.target.closest("a,button,input,select,textarea"))return;
+    S={el:el,group:el.dataset.sort,sx:e.clientX,sy:e.clientY,cy:e.clientY,pid:e.pointerId,active:false};
+    S.timer=setTimeout(activate,HOLD);
+  });
+  document.addEventListener("pointermove",function(e){
+    if(!S||e.pointerId!==S.pid)return;
+    S.cy=e.clientY;
+    if(!S.active&&(Math.abs(e.clientX-S.sx)>8||Math.abs(e.clientY-S.sy)>8)){clean();S=null;}
+  });
+  function finish(e,commit){
+    if(!S||e.pointerId!==S.pid)return;
+    var was=S.active,st=S;
+    clean();S=null;
+    if(!was)return;
+    ui.noClick=Date.now()+500;
+    if(commit&&st.to!==st.idx){
+      var ids=st.els.map(function(x){return x.dataset.sid;}),mv=ids.splice(st.idx,1)[0];
+      ids.splice(st.to,0,mv);
+      if(st.group.indexOf("g:")===0)reorderGoals(st.group.slice(2),ids);else if(st.group==="pots")reorderPots(ids);
+      save();
+    }
+    render();
+  }
+  document.addEventListener("pointerup",function(e){finish(e,true);});
+  document.addEventListener("pointercancel",function(e){finish(e,false);});
+  // once a drag has started, keep the page from scrolling under the finger
+  document.addEventListener("touchmove",function(e){if(S&&S.active)e.preventDefault();},{passive:false});
+  app.addEventListener("contextmenu",function(e){if(S)e.preventDefault();});
 })();
 
 load();render();
