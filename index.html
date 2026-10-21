@@ -93,6 +93,8 @@ input[type=date]{min-height:46px}
 .plant .pa{font-size:12px;color:var(--muted)}
 .plant .bar{margin:8px 10px 0}
 .potcard{cursor:pointer}
+.tx.planned .t,.tx.planned .a,.tx.planned .dot{opacity:.6}
+.tx.planned .s{font-style:italic}
 .mrow{display:grid;grid-template-columns:.9fr 1.1fr 1.1fr 1.1fr;gap:6px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
 .mrow:last-child{border-bottom:0}
 .mhead{color:var(--muted);font-size:12px;border-bottom:1px solid var(--line)}
@@ -132,7 +134,7 @@ var state={tx:[],goals:[],lists:[]};
 var ui={tab:"overview",month:ym(new Date()),catFilter:null,gl:"all",pot:null};
 
 function load(){
-  try{var raw=localStorage.getItem(KEY);if(raw){var d=JSON.parse(raw);state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;}}catch(e){}
+  try{var raw=localStorage.getItem(KEY);if(raw){var d=JSON.parse(raw);state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;}}catch(e){}
   var needs=(state.migr||0)<4&&(state.tx.length||state.goals.length||state.lists.length);
   normalize();if(needs)save();
 }
@@ -156,6 +158,17 @@ function sums(list){
   return r;
 }
 function txIn(m){return state.tx.filter(function(t){return t.date.slice(0,7)===m;});}
+// Planning: anything dated after today is "planned". It stays out of the current numbers until that day arrives,
+// unless "Including planned" is switched on (Savings / Wishlist) or you look at a future month (which is all plan).
+function isPlanned(t){return t.date>today();}
+function curMonth(){return today().slice(0,7);}
+function counts(t){return !!state.plan||!isPlanned(t);}
+function hasPlanned(){return state.tx.some(isPlanned);}
+function monthTx(m){return txIn(m).filter(function(t){return m>curMonth()||!isPlanned(t);});}
+function planToggle(){
+  if(!hasPlanned())return '';
+  return '<div style="margin:2px 4px 10px"><button class="golink" style="margin:0" data-act="plantoggle">Including planned: '+(state.plan?"On":"Off")+' ›</button><div class="muted" style="font-size:12px;margin-top:2px">'+(state.plan?"Showing balances as they will be once all planned entries have happened.":"Planned entries (dated after today) don\'t count yet.")+'</div></div>';
+}
 // A receipt can be split across categories; every transaction reads as a list of category lines.
 function lines(t){return t.splits&&t.splits.length?t.splits:[{cat:t.cat,amount:t.amount}];}
 // Wishlist lists (Move-in, First shopping, Furniture, ...). Every item belongs to one list.
@@ -220,6 +233,7 @@ function allocate(){
   wl.forEach(function(l){wid[l.id]=1;});
   allPots().forEach(function(l){potBal[l.id]=0;});
   state.tx.forEach(function(t){
+    if(!counts(t))return;
     if(t.type==="saving"){
       if(t.listId&&potBal[t.listId]!==undefined)potBal[t.listId]+=t.amount;
       else{totalSaved+=t.amount;if(t.listId&&wid[t.listId])savedTo[t.listId]=(savedTo[t.listId]||0)+t.amount;else G+=t.amount;}
@@ -251,7 +265,7 @@ function allocate(){
     out.lists[l.id]={saved:own,need:need,funded:funded};
   });
   var allSaved=0,potExp=0;
-  state.tx.forEach(function(t){if(t.type==="saving")allSaved+=t.amount;else if(t.type==="expense"&&t.fromPot&&potBal[t.fromPot]!==undefined)potExp+=t.amount;});
+  state.tx.forEach(function(t){if(!counts(t))return;if(t.type==="saving")allSaved+=t.amount;else if(t.type==="expense"&&t.fromPot&&potBal[t.fromPot]!==undefined)potExp+=t.amount;});
   out.balance=allSaved-spent-potExp;
   out.spent=spent;out.free=Math.max(0,totalSaved-(spent-potPaid));
   return out;
@@ -274,13 +288,19 @@ function monthBar(){
 }
 
 function viewOverview(){
-  var list=txIn(ui.month),s=sums(list),net=s.income-s.expense-s.saving;
+  var list=monthTx(ui.month),s=sums(list),net=s.income-s.expense-s.saving;
+  var isFuture=ui.month>curMonth(),fut=ui.month===curMonth()?txIn(ui.month).filter(isPlanned):[],fs=sums(fut),fnet=fs.income-fs.expense-fs.saving;
   var h='<div class="eyebrow">Overview</div><h1>Money</h1>'+monthBar();
-  h+='<div class="card"><div class="muted" style="font-size:13px">Left this month</div><div class="big '+(net<0?"expense":"")+'">'+huf(net)+'</div>';
+  h+='<div class="card"><div class="muted" style="font-size:13px">'+(isFuture?"Planned left this month":"Left this month")+'</div><div class="big '+(net<0?"expense":"")+'">'+huf(net)+'</div>';
   h+='<div class="grid3" style="margin-top:14px"><div><div class="v income">'+huf(s.income)+'</div><div class="l">Income</div></div><div><div class="v expense">'+huf(s.expense)+'</div><div class="l">Spent</div></div><div><div class="v saving">'+huf(s.saving)+'</div><div class="l">Saved</div></div></div>';
   if(s.income>0){var rate=Math.round(s.saving/s.income*100);h+='<div class="muted" style="font-size:13px;margin-top:12px">Savings rate: <strong style="color:var(--text)">'+rate+'%</strong></div>';}
-  h+='<div class="muted" style="font-size:13px;margin-top:8px">Saved so far, all months: <strong style="color:var(--text)">'+huf(allocate().balance)+'</strong></div>';
+  h+='<div class="muted" style="font-size:13px;margin-top:8px">Saved so far, all months'+(state.plan?" (incl. planned)":"")+': <strong style="color:var(--text)">'+huf(allocate().balance)+'</strong></div>';
   h+='</div>';
+  if(isFuture)h+='<div class="muted" style="font-size:13px;margin:-4px 4px 8px">This month is in the future, so everything in it is planned. It does not change your current numbers.</div>';
+  if(fut.length){
+    h+='<div class="card"><div class="eyebrow">Still planned this month</div><div class="grid3" style="margin-top:10px"><div><div class="v income">'+huf(fs.income)+'</div><div class="l">Income</div></div><div><div class="v expense">'+huf(fs.expense)+'</div><div class="l">Spending</div></div><div><div class="v saving">'+huf(fs.saving)+'</div><div class="l">Saving</div></div></div>';
+    h+='<div class="row spread" style="margin-top:14px"><span class="muted" style="font-size:13px">Left at month end, if all of it happens</span><strong class="'+(net+fnet<0?"expense":"")+'">'+huf(net+fnet)+'</strong></div></div>';
+  }
 
   // trend
   h+='<div class="card"><div class="eyebrow" style="margin-bottom:8px">Last 6 months</div>'+trendSvg()+'<div class="legend"><span><i style="background:var(--income)"></i>Income</span><span><i style="background:var(--expense)"></i>Spent</span><span><i style="background:var(--saving)"></i>Saved</span></div></div>';
@@ -321,7 +341,7 @@ function viewOverview(){
 function trendSvg(){
   var months=[],i;
   for(i=5;i>=0;i--)months.push(shiftMonth(ui.month,-i));
-  var data=months.map(function(m){var s=sums(txIn(m));return s;});
+  var data=months.map(function(m){var s=sums(monthTx(m));return s;});
   var max=1;data.forEach(function(d){max=Math.max(max,d.income,d.expense,d.saving);});
   var W=320,H=140,pb=22,ph=H-pb,gw=W/6,bw=11,gap=3;
   var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Six month trend">';
@@ -350,7 +370,7 @@ function viewTx(){
   list.forEach(function(t){
     if(t.date!==last){
       if(open)h+='</div>';
-      h+='<div class="day">'+dayLabel(t.date)+'</div><div class="card" style="margin-top:6px;padding:4px 16px">';
+      h+='<div class="day">'+dayLabel(t.date)+(isPlanned(t)?' · planned':'')+'</div><div class="card" style="margin-top:6px;padding:4px 16px">';
       open=true;last=t.date;
     }
     var sign=t.type==="income"?"+":t.type==="expense"?"−":"";
@@ -359,7 +379,7 @@ function viewTx(){
       sub=t.splits.map(function(l){return l.cat;}).join(" · ");ico="🧾";ttl=t.place||t.note||"Split receipt";
       if(cf){amt=0;t.splits.forEach(function(l){if(l.cat===cf)amt+=l.amount;});sub="of "+huf(t.amount)+" receipt · "+sub;}
     }
-    h+='<div class="tx" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc(sub+(lst?" → "+lst:"")+(frm?" · from "+frm:"")+(t.place&&t.note?" · "+t.note:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
+    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm:"")+(t.place&&t.note?" · "+t.note:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
   });
   if(open)h+='</div>';
   return h;
@@ -392,7 +412,7 @@ function viewGoals(){
   var a=allocate();
   if(ui.gl!=="all"&&!wishLists().some(function(l){return l.id===ui.gl;}))ui.gl="all";
   var sn=0,sf=0;wishLists().forEach(function(l){sn+=a.lists[l.id].need;sf+=a.lists[l.id].funded;});
-  var h='<div class="eyebrow">Saving for</div><h1>Wishlist</h1>';
+  var h='<div class="eyebrow">Saving for</div><h1>Wishlist</h1>'+planToggle();
   h+='<div class="card"><div class="grid3"><div><div class="v saving">'+huf(a.totalSaved)+'</div><div class="l">Saved for wishlists</div></div><div><div class="v">'+huf(a.spent)+'</div><div class="l">Already bought</div></div><div><div class="v">'+huf(a.free)+'</div><div class="l">Available</div></div></div><div class="grid3" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div><div class="v">'+huf(sn)+'</div><div class="l">Total, all lists</div></div><div><div class="v saving">'+huf(sf)+'</div><div class="l">Covered so far</div></div><div><div class="v">'+huf(Math.max(0,sn-sf))+'</div><div class="l">Still to save</div></div></div><div class="muted" style="font-size:13px;margin-top:12px">When you log money as <strong>Saved</strong>, pick a wishlist or a plant in your garden. Each wishlist can also be funded from plants (tap “Funded from”). Savings with no wishlist flow through your wishlists in order.</div></div>';
   h+='<div class="gtabs"><button data-gl="all" class="'+(ui.gl==="all"?"on":"")+'">All</button>'+wishLists().map(function(l){return '<button data-gl="'+l.id+'" class="'+(ui.gl===l.id?"on":"")+'">'+esc(l.name)+'</button>';}).join("")+'</div>';
   var shown=ui.gl==="all"?wishLists():wishLists().filter(function(l){return l.id===ui.gl;});
@@ -423,6 +443,18 @@ function shortMonth(m){var q=m.split("-");return new Date(+q[0],+q[1]-1,1).toLoc
 function potMoves(id){
   var m=[];
   state.tx.forEach(function(t,i){
+    if(!counts(t))return;
+    if(t.type==="saving"&&t.listId===id)m.push({t:t,amt:t.amount,i:i});
+    else if(t.type==="expense"&&t.fromPot===id)m.push({t:t,amt:-t.amount,i:i});
+  });
+  m.sort(function(a,b){return a.t.date<b.t.date?-1:a.t.date>b.t.date?1:a.i-b.i;});
+  return m;
+}
+function plannedMoves(id){
+  var m=[];
+  if(state.plan)return m;
+  state.tx.forEach(function(t,i){
+    if(!isPlanned(t))return;
     if(t.type==="saving"&&t.listId===id)m.push({t:t,amt:t.amount,i:i});
     else if(t.type==="expense"&&t.fromPot===id)m.push({t:t,amt:-t.amount,i:i});
   });
@@ -441,7 +473,7 @@ function viewSavings(){
   if(ui.pot)return viewPot(ui.pot,a);
   var tb=0,tbud=0,td=0,tw=0;
   var rows=pl.map(function(l){var st=potStats(l.id,a);tb+=st.bal;tbud+=(l.budget||0);td+=st.dep;tw+=st.wd+st.wishUsed;return {l:l,st:st};});
-  var h='<div class="eyebrow">Garden</div><h1>Savings</h1>';
+  var h='<div class="eyebrow">Garden</div><h1>Savings</h1>'+planToggle();
   h+='<div class="card"><div class="muted" style="font-size:13px">In your garden now</div><div class="big saving">'+huf(tb)+'</div>';
   h+='<div class="grid3" style="margin-top:14px"><div><div class="v">'+huf(td)+'</div><div class="l">Saved in total</div></div><div><div class="v expense">'+huf(tw)+'</div><div class="l">Used so far</div></div><div><div class="v">'+(tbud>0?huf(tbud):"–")+'</div><div class="l">Total budgets</div></div></div></div>';
   if(!pl.length)h+='<div class="card empty">No plants in your garden. Add one below.</div>';
@@ -497,7 +529,13 @@ function viewPot(id,a){
   h+='<button class="btn sec" style="margin-top:14px" data-plant="'+id+'">'+(bud>0?"Change budget":"Set a budget")+'</button>';
   h+=l.done?'<button class="btn sec" style="margin-top:8px" data-act="plantrestore" data-pid="'+id+'">Bring back to the garden</button>':'<button class="btn danger" style="margin-top:8px" data-act="plantdone" data-pid="'+id+'">Finish this plant</button>';
   h+='</div>';
-  if(!st.moves.length)return h+'<div class="card empty">Nothing saved into this plant yet. Tap + and choose “Save for” → '+esc(l.name)+'.</div>';
+  var pm=plannedMoves(id),pmh='';
+  if(pm.length){
+    pmh='<div class="card" style="padding:4px 16px"><div class="eyebrow" style="padding:12px 0 2px">Planned</div>';
+    pm.forEach(function(x){var t=x.t,isIn=x.amt>0;pmh+='<div class="tx planned" data-edit="'+t.id+'"><div class="dot">'+(isIn?"🌱":(ICON[t.cat]||"🛍️"))+'</div><div class="mid"><div class="t">'+esc(isIn?(t.note||"Saved"):(t.place||t.note||t.cat))+'</div><div class="s">'+shortDay(t.date)+' · planned</div></div><div class="a '+(isIn?"income":"expense")+'">'+(isIn?"+":"−")+huf(Math.abs(x.amt))+'</div></div>';});
+    pmh+='</div>';
+  }
+  if(!st.moves.length)return h+pmh+'<div class="card empty">Nothing saved into this plant yet. Tap + and choose “Save for” → '+esc(l.name)+'.</div>';
   h+='<div class="card"><div class="eyebrow" style="margin-bottom:8px">Balance over time</div>'+balanceChart(st.moves,bud)+'</div>';
   // month by month
   var first=st.moves[0].t.date.slice(0,7),last=ym(new Date());
@@ -511,6 +549,7 @@ function viewPot(id,a){
   h+='<div class="card"><div class="eyebrow" style="margin-bottom:4px">Month by month</div><div class="mrow mhead"><span>Month</span><span>Saved</span><span>Taken out</span><span>Balance</span></div>';
   months.slice().reverse().forEach(function(r){h+='<div class="mrow"><span>'+shortMonth(r.m)+'</span><span class="income">'+(r.inn?'+'+huf(r.inn):'–')+'</span><span class="expense">'+(r.out?'−'+huf(r.out):'–')+'</span><span style="font-weight:600">'+huf(r.end)+'</span></div>';});
   h+='</div>';
+  h+=pmh;
   // every movement, newest first, with running balance
   var run2=0,list=st.moves.map(function(x){run2+=x.amt;return {x:x,bal:run2};}).reverse();
   h+='<div class="card" style="padding:4px 16px"><div class="eyebrow" style="padding:12px 0 2px">All movements</div>';
@@ -589,7 +628,7 @@ function drawTxSheet(){
     var bal=allocate().pots;
     h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
   }
-  h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'">';
+  h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'"><div class="muted" style="font-size:12px;margin-top:6px">A date after today makes this a plan. It doesn\'t change your current numbers until that day.</div>';
   var places=[];state.tx.forEach(function(t){if(t.place&&places.indexOf(t.place)<0)places.push(t.place);});
   h+='<label>Place (optional)</label><input id="f_place" type="text" list="f_places" autocomplete="off" value="'+esc(d.place||"")+'" placeholder="e.g. Lidl"><datalist id="f_places">'+places.sort().map(function(p){return '<option value="'+esc(p)+'">';}).join("")+'</datalist>';
   h+='<label>Note (optional)</label><input id="f_note" type="text" value="'+esc(d.note)+'" placeholder="e.g. weekly shop">';
@@ -750,6 +789,7 @@ app.addEventListener("click",function(e){
   if(act==="next"){ui.month=shiftMonth(ui.month,1);render();return;}
   if(act==="backup"){download("money-backup-"+today()+".json",JSON.stringify(state),"application/json");return;}
   if(act==="csv"){exportCsv();return;}
+  if(act==="plantoggle"){state.plan=!state.plan;save();render();return;}
   if(act==="lists"){listsSheet();return;}
   if(act==="newplant"){openSheet('<h2>New plant</h2><div class="muted" style="font-size:13px">A place to save for something specific, for example a wedding gift or a trip.</div><label>Name</label><input id="np_name" type="text" maxlength="40" placeholder="e.g. Wedding gift"><label>Budget (Ft, optional)</label><input id="np_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 60000"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="np_save">Plant it</button></div>');return;}
   if(act==="plantdone"){var dl=state.lists.filter(function(x){return x.id===t.dataset.pid;})[0];if(!dl)return;
@@ -940,8 +980,8 @@ function download(name,content,type){
   setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1000);
 }
 function exportCsv(){
-  var rows=[["date","type","category","amount_huf","place","note"]];
-  state.tx.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(t){lines(t).forEach(function(l){rows.push([t.date,t.type,l.cat,l.amount,t.place||"",t.note||""]);});});
+  var rows=[["date","type","category","amount_huf","place","note","planned"]];
+  state.tx.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(t){lines(t).forEach(function(l){rows.push([t.date,t.type,l.cat,l.amount,t.place||"",t.note||"",isPlanned(t)?"yes":"no"]);});});
   var csv=rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(",");}).join("\n");
   download("money-transactions-"+today()+".csv","\ufeff"+csv,"text/csv");
 }
@@ -970,6 +1010,13 @@ function restore(file){
 })();
 
 load();render();
+// a new day may turn planned entries into real ones: refresh when the app is reopened on another day
+var lastDay=today();
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden||today()===lastDay)return;
+  lastDay=today();
+  if(!overlay.classList.contains("open"))render();
+});
 if(navigator.storage&&navigator.storage.persist){try{navigator.storage.persist();}catch(e){}}
 })();
 </script>
