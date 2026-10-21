@@ -120,8 +120,9 @@ var state={tx:[],goals:[],lists:[]};
 var ui={tab:"overview",month:ym(new Date()),catFilter:null,gl:"all"};
 
 function load(){
-  try{var raw=localStorage.getItem(KEY);if(raw){var d=JSON.parse(raw);state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];}}catch(e){}
-  normalize();
+  try{var raw=localStorage.getItem(KEY);if(raw){var d=JSON.parse(raw);state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;}}catch(e){}
+  var needs=(state.migr||0)<2&&(state.tx.length||state.goals.length||state.lists.length);
+  normalize();if(needs)save();
 }
 function save(){
   try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){alert("Could not save – storage may be full. Export a backup and remove some photos.");}
@@ -148,7 +149,21 @@ function lines(t){return t.splits&&t.splits.length?t.splits:[{cat:t.cat,amount:t
 // Wishlist lists (Move-in, First shopping, Furniture, ...). Every item belongs to one list.
 function normalize(){
   if(!Array.isArray(state.lists)||!state.lists.length){
-    state.lists=[{id:"l_move",name:"Move-in"},{id:"l_first",name:"First shopping"},{id:"l_furn",name:"Furniture"},{id:"l_wish",name:"Shopping wishlist"}];
+    state.lists=[{id:"l_move",name:"Move-in"},{id:"l_house",name:"Move-in household items"},{id:"l_furn",name:"Furniture"},{id:"l_wish",name:"Shopping wishlist"}];
+    state.migr=2;
+  }
+  // one-time cleanup of the first starter lists: "First shopping" and the old catch-all go into "Move-in"
+  if((state.migr||0)<2){
+    if(state.lists.some(function(l){return l.id==="l_move";})){
+      state.goals.forEach(function(g){if(g.listId==="l_first"||g.listId==="l_wish")g.listId="l_move";});
+      state.tx.forEach(function(t){if(t.listId==="l_first")t.listId="l_move";});
+      state.lists=state.lists.filter(function(l){return l.id!=="l_first";});
+      if(!state.lists.some(function(l){return l.id==="l_house";})){
+        var mi=state.lists.findIndex(function(l){return l.id==="l_move";});
+        state.lists.splice(mi+1,0,{id:"l_house",name:"Move-in household items"});
+      }
+    }
+    state.migr=2;
   }
   var ids=state.lists.map(function(l){return l.id;}),fb=state.lists[state.lists.length-1].id;
   state.goals.forEach(function(g){if(ids.indexOf(g.listId)<0)g.listId=fb;});
