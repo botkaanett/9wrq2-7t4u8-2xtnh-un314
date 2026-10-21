@@ -241,6 +241,9 @@ function allocate(){
     });
     out.lists[l.id]={saved:own,need:need,funded:funded};
   });
+  var allSaved=0,potExp=0;
+  state.tx.forEach(function(t){if(t.type==="saving")allSaved+=t.amount;else if(t.type==="expense"&&t.fromPot&&potBal[t.fromPot]!==undefined)potExp+=t.amount;});
+  out.balance=allSaved-spent-potExp;
   out.spent=spent;out.free=Math.max(0,totalSaved-(spent-potPaid));
   return out;
 }
@@ -266,6 +269,7 @@ function viewOverview(){
   h+='<div class="card"><div class="muted" style="font-size:13px">Left this month</div><div class="big '+(net<0?"expense":"")+'">'+huf(net)+'</div>';
   h+='<div class="grid3" style="margin-top:14px"><div><div class="v income">'+huf(s.income)+'</div><div class="l">Income</div></div><div><div class="v expense">'+huf(s.expense)+'</div><div class="l">Spent</div></div><div><div class="v saving">'+huf(s.saving)+'</div><div class="l">Saved</div></div></div>';
   if(s.income>0){var rate=Math.round(s.saving/s.income*100);h+='<div class="muted" style="font-size:13px;margin-top:12px">Savings rate: <strong style="color:var(--text)">'+rate+'%</strong></div>';}
+  h+='<div class="muted" style="font-size:13px;margin-top:8px">Saved so far, all months: <strong style="color:var(--text)">'+huf(allocate().balance)+'</strong></div>';
   h+='</div>';
 
   // trend
