@@ -198,7 +198,11 @@ function normalize(){
   wl.forEach(function(l){if(l.pots)l.pots=l.pots.filter(function(id){return ids.indexOf(id)>=0;});});
 }
 function wishLists(){return state.lists.filter(function(l){return !l.pot;});}
-function potLists(){return state.lists.filter(function(l){return l.pot;});}
+function allPots(){return state.lists.filter(function(l){return l.pot;});}
+function potLists(){return state.lists.filter(function(l){return l.pot&&!l.done;});}
+function donePots(){return state.lists.filter(function(l){return l.pot&&l.done;});}
+// plants offered in a dropdown: the active ones, plus a finished one if the entry being edited already uses it
+function potsFor(sel){return allPots().filter(function(l){return !l.done||l.id===sel;});}
 function listName(id){var l=state.lists.filter(function(x){return x.id===id;})[0];return l?l.name:"";}
 function listByName(n){
   n=String(n||"").trim();if(!n)return null;
@@ -214,7 +218,7 @@ function listByName(n){
 function allocate(){
   var wl=wishLists(),wid={},savedTo={},G=0,spent=0,totalSaved=0,potBal={},potRem={},potPaid=0;
   wl.forEach(function(l){wid[l.id]=1;});
-  potLists().forEach(function(l){potBal[l.id]=0;});
+  allPots().forEach(function(l){potBal[l.id]=0;});
   state.tx.forEach(function(t){
     if(t.type==="saving"){
       if(t.listId&&potBal[t.listId]!==undefined)potBal[t.listId]+=t.amount;
@@ -433,14 +437,14 @@ function potStats(id,a){
 }
 function viewSavings(){
   var a=allocate(),pl=potLists();
-  if(ui.pot&&!pl.some(function(l){return l.id===ui.pot;}))ui.pot=null;
+  if(ui.pot&&!allPots().some(function(l){return l.id===ui.pot;}))ui.pot=null;
   if(ui.pot)return viewPot(ui.pot,a);
   var tb=0,tbud=0,td=0,tw=0;
   var rows=pl.map(function(l){var st=potStats(l.id,a);tb+=st.bal;tbud+=(l.budget||0);td+=st.dep;tw+=st.wd+st.wishUsed;return {l:l,st:st};});
   var h='<div class="eyebrow">Garden</div><h1>Savings</h1>';
   h+='<div class="card"><div class="muted" style="font-size:13px">In your garden now</div><div class="big saving">'+huf(tb)+'</div>';
   h+='<div class="grid3" style="margin-top:14px"><div><div class="v">'+huf(td)+'</div><div class="l">Saved in total</div></div><div><div class="v expense">'+huf(tw)+'</div><div class="l">Used so far</div></div><div><div class="v">'+(tbud>0?huf(tbud):"–")+'</div><div class="l">Total budgets</div></div></div></div>';
-  if(!pl.length)return h+'<div class="card empty">No plants yet. Add one under Wishlist → Manage lists.</div>';
+  if(!pl.length)h+='<div class="card empty">No plants in your garden. Add one below.</div>';
   rows.forEach(function(r){
     var l=r.l,st=r.st,bud=l.budget||0,pr=bud>0?st.bal/bud:0;
     h+='<div class="card potcard" data-pot="'+l.id+'"><div class="row" style="align-items:center">'+plantSvg(pr,56)+'<div style="flex:1;min-width:0"><div class="row spread"><strong>'+esc(l.name)+'</strong><span class="'+(st.bal<0?"expense":"")+'" style="font-weight:650">'+huf(st.bal)+'</span></div>';
@@ -449,7 +453,14 @@ function viewSavings(){
     h+='<div class="muted" style="font-size:12px;margin-top:6px">Saved '+huf(st.dep)+' · Used '+huf(st.wd+st.wishUsed)+'</div></div></div></div>';
   });
   var gen=a.totalSaved;
+  h+='<button class="btn sec" data-act="newplant" style="margin-top:4px">+ New plant</button>';
   h+='<div class="card"><div class="row spread"><span class="muted">Saved for wishlists (not in a plant)</span><strong>'+huf(gen)+'</strong></div></div>';
+  var dn=donePots();
+  if(dn.length){
+    h+='<div class="lsec">Finished plants</div><div class="card" style="padding:4px 16px">';
+    dn.forEach(function(l){var st=potStats(l.id,a);h+='<div class="tx" data-pot="'+l.id+'"><div class="dot">🌿</div><div class="mid"><div class="t">'+esc(l.name)+'</div><div class="s">Saved '+huf(st.dep)+' · Used '+huf(st.wd+st.wishUsed)+'</div></div><div class="a">'+huf(st.bal)+'</div></div>';});
+    h+='<div class="muted" style="font-size:12px;padding:8px 0 12px">Finished plants are hidden everywhere else. Any money left in them stays there until you bring them back.</div></div>';
+  }
   return h;
 }
 function balanceChart(moves,budget){
@@ -483,7 +494,9 @@ function viewPot(id,a){
   h+='<div class="muted" style="font-size:14px;margin-top:2px">'+(bud>0?'of '+huf(bud)+' · '+(pr>=1?'in bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%'):'No budget set yet')+'</div>';
   if(bud>0)h+='<div class="bar" style="margin:12px 0 0"><i style="width:'+Math.min(100,Math.max(0,pr*100))+'%;background:var(--income)"></i></div>';
   h+='<div class="grid3" style="margin-top:16px"><div><div class="v income">'+huf(st.dep)+'</div><div class="l">Saved in</div></div><div><div class="v expense">'+huf(st.wd+st.wishUsed)+'</div><div class="l">Taken out</div></div><div><div class="v">'+(bud>0?huf(Math.max(0,bud-st.bal)):"–")+'</div><div class="l">To budget</div></div></div>';
-  h+='<button class="btn sec" style="margin-top:14px" data-plant="'+id+'">'+(bud>0?"Change budget":"Set a budget")+'</button></div>';
+  h+='<button class="btn sec" style="margin-top:14px" data-plant="'+id+'">'+(bud>0?"Change budget":"Set a budget")+'</button>';
+  h+=l.done?'<button class="btn sec" style="margin-top:8px" data-act="plantrestore" data-pid="'+id+'">Bring back to the garden</button>':'<button class="btn danger" style="margin-top:8px" data-act="plantdone" data-pid="'+id+'">Finish this plant</button>';
+  h+='</div>';
   if(!st.moves.length)return h+'<div class="card empty">Nothing saved into this plant yet. Tap + and choose “Save for” → '+esc(l.name)+'.</div>';
   h+='<div class="card"><div class="eyebrow" style="margin-bottom:8px">Balance over time</div>'+balanceChart(st.moves,bud)+'</div>';
   // month by month
@@ -570,11 +583,11 @@ function drawTxSheet(){
   }
   if(d.type==="saving"){
     var opt=function(l){return '<option value="'+l.id+'"'+(d.listId===l.id?" selected":"")+'>'+esc(l.name)+'</option>';};
-    h+='<label>Save for</label><select id="f_for"><option value="">Any wishlist (general)</option><optgroup label="Wishlists">'+wishLists().map(opt).join("")+'</optgroup><optgroup label="Garden">'+potLists().map(opt).join("")+'</optgroup></select>';
+    h+='<label>Save for</label><select id="f_for"><option value="">Any wishlist (general)</option><optgroup label="Wishlists">'+wishLists().map(opt).join("")+'</optgroup><optgroup label="Garden">'+potsFor(d.listId).map(opt).join("")+'</optgroup></select>';
   }
-  if(d.type==="expense"&&potLists().length){
+  if(d.type==="expense"&&potsFor(d.fromPot).length){
     var bal=allocate().pots;
-    h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potLists().map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
+    h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
   }
   h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'">';
   var places=[];state.tx.forEach(function(t){if(t.place&&places.indexOf(t.place)<0)places.push(t.place);});
@@ -738,6 +751,12 @@ app.addEventListener("click",function(e){
   if(act==="backup"){download("money-backup-"+today()+".json",JSON.stringify(state),"application/json");return;}
   if(act==="csv"){exportCsv();return;}
   if(act==="lists"){listsSheet();return;}
+  if(act==="newplant"){openSheet('<h2>New plant</h2><div class="muted" style="font-size:13px">A place to save for something specific, for example a wedding gift or a trip.</div><label>Name</label><input id="np_name" type="text" maxlength="40" placeholder="e.g. Wedding gift"><label>Budget (Ft, optional)</label><input id="np_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 60000"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="np_save">Plant it</button></div>');return;}
+  if(act==="plantdone"){var dl=state.lists.filter(function(x){return x.id===t.dataset.pid;})[0];if(!dl)return;
+    var bl=allocate().pots[dl.id]||0;
+    if(confirm("Finish “"+dl.name+"”? It disappears from your garden and from the Save for choices, but its history is kept"+(bl>0?". The "+huf(bl)+" still in it stays there until you bring it back.":"."))){dl.done=true;save();ui.pot=null;render();}
+    return;}
+  if(act==="plantrestore"){var rl=state.lists.filter(function(x){return x.id===t.dataset.pid;})[0];if(rl){rl.done=false;save();render();}return;}
   if(act==="wl-clear"){
     var all=ui.gl==="all",sc=all?state.goals:state.goals.filter(function(g){return g.listId===ui.gl;});
     if(!sc.length)return;
@@ -826,6 +845,11 @@ sheet.addEventListener("click",function(e){
   if(b.dataset.ldel!==undefined){delList(+b.dataset.ldel);return;}
   if(b.dataset.ftog){var fi=fdraft.pots.indexOf(b.dataset.ftog);if(fi<0)fdraft.pots.push(b.dataset.ftog);else fdraft.pots.splice(fi,1);fundSheet(null);return;}
   if(b.id==="f_fsave"){var fl2=state.lists.filter(function(x){return x.id===fdraft.id;})[0];if(fl2){fl2.pots=fdraft.pots;save();}closeSheet();return;}
+  if(b.id==="np_save"){
+    var nm=document.getElementById("np_name").value.trim();if(!nm){alert("Give the plant a name.");return;}
+    var nb=Math.max(0,parseFloat(document.getElementById("np_budget").value)||0),np={id:uid(),name:nm.slice(0,40),pot:true,budget:nb};
+    state.lists.push(np);save();closeSheet();ui.pot=np.id;render();window.scrollTo(0,0);return;
+  }
   if(b.id==="pl_save"){var pl0=state.lists.filter(function(x){return x.id===b.dataset.pid;})[0];if(pl0){pl0.budget=Math.max(0,parseFloat(document.getElementById("pl_budget").value)||0);save();}closeSheet();return;}
   if(b.id==="p_add"){var pi=document.getElementById("p_new"),pn=pi.value.trim();if(!pn)return;state.lists.push({id:uid(),name:pn.slice(0,40),pot:true});save();listsSheet();return;}
   if(b.id==="l_add"){var ni=document.getElementById("l_new"),nm=ni.value.trim();if(!nm)return;state.lists.push({id:uid(),name:nm.slice(0,40)});save();listsSheet();return;}
