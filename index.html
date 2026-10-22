@@ -138,7 +138,7 @@ var CATS={
 var ICON={};
 Object.keys(CATS).forEach(function(k){CATS[k].forEach(function(c){ICON[c[1]]=c[0];});});
 
-var state={tx:[],goals:[],lists:[]};
+var state={tx:[],goals:[],lists:[],rec:[]};
 var ui={tab:"overview",month:ym(new Date()),catFilter:null,txView:"date",gl:"all",pot:null,noClick:0};
 
 // Storage: IndexedDB (hundreds of MB, survives reloads) with the old localStorage copy as the fallback and the migration source.
@@ -157,9 +157,9 @@ function toast(msg){
   clearTimeout(toast.h);toast.h=setTimeout(function(){t.style.display="none";},12000);
 }
 function loadFrom(raw){
-  try{var d=typeof raw==="string"?JSON.parse(raw):raw;if(d){state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;state.eurRate=d.eurRate>0?d.eurRate:undefined;}}catch(e){}
+  try{var d=typeof raw==="string"?JSON.parse(raw):raw;if(d){state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;state.eurRate=d.eurRate>0?d.eurRate:undefined;state.rec=Array.isArray(d.rec)?d.rec:[];}}catch(e){}
   var needs=(state.migr||0)<4&&(state.tx.length||state.goals.length||state.lists.length);
-  normalize();if(needs)save();
+  normalize();var syn=syncRec();if(needs||syn)save();
 }
 function load(){
   var raw=null;try{raw=localStorage.getItem(KEY);}catch(e){}
@@ -183,6 +183,52 @@ function isEurId(id){var l=state.lists.filter(function(x){return x.id===id;})[0]
 function fmtP(l,n){return l&&l.cur==="EUR"?eur(n):huf(n);}
 function toHuf(l,n){return l&&l.cur==="EUR"?n*(state.eurRate||0):n;}
 function eurPot(){return state.lists.filter(function(l){return l.pot&&l.cur==="EUR"&&!l.done;})[0];}
+/* ---------- recurring payments: subscriptions and instalments (BNPL) ---------- */
+function syncRec(){
+  var changed=false,have={},horizon=shiftMonth(curMonth(),12);
+  state.tx.forEach(function(t){if(t.recId)have[t.id]=1;});
+  state.rec.forEach(function(r){
+    var sm=r.start.slice(0,7);
+    for(var k=0;k<600;k++){
+      if(r.n>0&&k>=r.n)break;
+      var m=shiftMonth(sm,k);if(m>horizon)break;
+      if((r.skip||[]).indexOf(k)>=0)continue;
+      var id="r_"+r.id+"_"+k;if(have[id])continue;
+      var dim=new Date(+m.slice(0,4),+m.slice(5,7),0).getDate(),day=Math.min(r.day,dim);
+      state.tx.push({id:id,recId:r.id,recK:k,type:"expense",amount:r.amount,cat:r.cat,date:m+"-"+pad(day),place:r.name,note:(r.n>0?"Payment "+(k+1)+"/"+r.n:"Monthly")+(r.note?" · "+r.note:"")});
+      changed=true;
+    }
+  });
+  return changed;
+}
+function recInfo(r){
+  var all=state.tx.filter(function(t){return t.recId===r.id;}).sort(function(a,b){return a.date<b.date?-1:1;});
+  var paid=all.filter(function(t){return !isPlanned(t);}).length,next=all.filter(isPlanned)[0];
+  return {paid:paid,next:next,last:all.length?all[all.length-1]:null};
+}
+function recSheet(id){
+  var r=state.rec.filter(function(x){return x.id===id;})[0];if(!r)return;
+  var i=recInfo(r);
+  var h='<h2>'+esc(r.name)+'</h2><div class="muted" style="font-size:14px">'+huf(r.amount)+' every month, on day '+r.day+' · '+esc(r.cat)+'</div>';
+  h+='<div style="margin:12px 0"><strong>'+(r.n>0?i.paid+' of '+r.n+' paid':i.paid+' paid · ongoing')+'</strong>'+(i.next?'<div class="muted" style="font-size:14px;margin-top:4px">Next: '+shortDay(i.next.date)+'</div>':'')+(r.n>0&&i.last?'<div class="muted" style="font-size:14px">Last payment: '+shortDay(i.last.date)+'</div>':'')+'</div>';
+  h+='<div class="muted" style="font-size:13px">Future payments appear as plans in the months ahead and become real on their day. To skip one month, delete that payment from Transactions.</div>';
+  h+='<button class="btn sec" style="margin-top:14px" data-act="recstop" data-rid="'+id+'">Stop (remove future payments)</button><button class="btn danger" style="margin-top:8px" data-act="recdel" data-rid="'+id+'">Delete with all its payments</button><div class="actions"><button class="btn sec" id="f_cancel">Close</button></div>';
+  openSheet(h);
+}
+function recStop(id){
+  var rr=state.rec.filter(function(r){return r.id===id;})[0];if(!rr)return;
+  if(confirm("Stop “"+rr.name+"”? Payments still in the future are removed; past ones stay.")){
+    state.tx=state.tx.filter(function(x){return !(x.recId===rr.id&&isPlanned(x));});
+    state.rec=state.rec.filter(function(r){return r.id!==rr.id;});save();closeSheet();render();
+  }
+}
+function recDel(id){
+  var rd=state.rec.filter(function(r){return r.id===id;})[0];if(!rd)return;
+  if(confirm("Delete “"+rd.name+"” and every payment it created, including past ones?")){
+    state.tx=state.tx.filter(function(x){return x.recId!==rd.id;});
+    state.rec=state.rec.filter(function(r){return r.id!==rd.id;});save();closeSheet();render();
+  }
+}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function monthLabel(m){var p=m.split("-");return new Date(+p[0],+p[1]-1,1).toLocaleDateString("en-GB",{month:"long",year:"numeric"});}
 function shiftMonth(m,d){var p=m.split("-");return ym(new Date(+p[0],+p[1]-1+d,1));}
@@ -210,9 +256,10 @@ function planToggle(){
 function lines(t){return t.splits&&t.splits.length?t.splits:[{cat:t.cat,amount:t.amount}];}
 // Wishlist lists (Move-in, First shopping, Furniture, ...). Every item belongs to one list.
 function normalize(){
+  if(!Array.isArray(state.rec))state.rec=[];
   if(!Array.isArray(state.lists)||!state.lists.length){
-    state.lists=[{id:"l_move",name:"Move-in"},{id:"l_house",name:"Move-in household items"},{id:"l_furn",name:"Furniture"},{id:"l_wish",name:"Shopping wishlist"}];
-    state.migr=2;
+    state.lists=[["p_presents","Presents"],["p_health","Health"],["p_travel","Travel & leisure"],["p_clothing","Clothing & shopping"],["p_revolut","Revolut"],["p_misc","Miscellaneous"]].map(function(x){return {id:x[0],name:x[1],pot:true};});
+    state.migr=4;
   }
   // one-time cleanup of the first starter lists: "First shopping" and the old catch-all go into "Move-in"
   if((state.migr||0)<2){
@@ -242,8 +289,8 @@ function normalize(){
     }
     state.migr=4;
   }
-  var ids=state.lists.map(function(l){return l.id;}),wl=wishLists(),wids=wl.map(function(l){return l.id;}),fb=wl[wl.length-1].id;
-  state.goals.forEach(function(g){if(wids.indexOf(g.listId)<0)g.listId=fb;});
+  var ids=state.lists.map(function(l){return l.id;}),wl=wishLists(),wids=wl.map(function(l){return l.id;}),fb=wl.length?wl[wl.length-1].id:null;
+  if(fb)state.goals.forEach(function(g){if(wids.indexOf(g.listId)<0)g.listId=fb;});else state.goals=[];
   state.tx.forEach(function(t){if(t.listId&&ids.indexOf(t.listId)<0)delete t.listId;if(t.fromPot&&ids.indexOf(t.fromPot)<0)delete t.fromPot;});
   wl.forEach(function(l){if(l.pots)l.pots=l.pots.filter(function(id){return ids.indexOf(id)>=0;});});
 }
@@ -483,6 +530,7 @@ function viewGoals(){
   h+='<div class="gtabs"><button data-gl="all" class="'+(ui.gl==="all"?"on":"")+'">All</button>'+wishLists().map(function(l){return '<button data-gl="'+l.id+'" class="'+(ui.gl===l.id?"on":"")+'">'+esc(l.name)+'</button>';}).join("")+'</div>';
   var shown=ui.gl==="all"?wishLists():wishLists().filter(function(l){return l.id===ui.gl;});
   var any=false;
+  if(!wishLists().length)h+='<div class="card empty">No wishlists yet.<br><br><button class="btn" data-act="newlist">+ New wishlist</button></div>';
   shown.forEach(function(l){
     var sibs=state.goals.filter(function(g){return g.listId===l.id;}),st=a.lists[l.id];
     if(ui.gl==="all"&&!sibs.length&&!st.saved)return;
@@ -496,7 +544,7 @@ function viewGoals(){
     var fo=sibs.findIndex(function(g){return !g.done;});
     sibs.forEach(function(g,i){h+=goalCard(g,sibs,i,i===fo,a);});
   });
-  if(!any)h+='<div class="card empty">Add something you want to buy with the + button.</div>';
+  if(!any&&wishLists().length)h+='<div class="card empty">Add something you want to buy with the + button.</div>';
   h+='<button class="btn sec" data-act="lists" style="margin-top:16px">Manage lists</button>';
   var scope=ui.gl==="all"?state.goals:state.goals.filter(function(g){return g.listId===ui.gl;});
   if(scope.length)h+='<button class="btn danger" data-act="wl-clear" style="margin-top:8px">'+(ui.gl==="all"?"Delete all wishlist items":"Delete all items in “"+esc(listName(ui.gl))+"”")+'</button>';
@@ -638,7 +686,11 @@ function viewMore(){
   h+='<button class="btn sec" data-act="restore">Restore from backup</button><input type="file" id="restoreFile" accept="application/json,.json" class="hidden"></div>';
   h+='<div class="card"><div class="eyebrow">Wishlist import</div><div class="muted" style="font-size:14px;margin:6px 0 12px">Add several wishlist items at once from the JSON an AI filled in for you (name, price, photo, link). Items already on your wishlist with the same link are skipped.</div>';
   h+='<button class="btn" data-act="wl-paste">Paste JSON</button><div style="height:8px"></div><button class="btn sec" data-act="wl-file">Choose JSON file</button><input type="file" id="wlFile" accept="application/json,.json,.txt" class="hidden"></div>';
-  h+='<div class="card"><div class="muted" style="font-size:13px">'+state.tx.length+' transactions · '+state.goals.length+' wishlist items · version 22 Oct (EUR, decimal comma)</div></div>';
+  h+='<div class="card"><div class="eyebrow">Recurring payments</div>';
+  if(!state.rec.length)h+='<div class="muted" style="font-size:14px;margin-top:6px">Subscriptions, instalments (BNPL) and fixed fees. Add one with + → Expense → “Repeat every month”.</div>';
+  state.rec.forEach(function(r){var i=recInfo(r);h+='<div class="tx" data-act="recopen" data-rid="'+r.id+'"><div class="dot">🔁</div><div class="mid"><div class="t">'+esc(r.name)+'</div><div class="s">'+(r.n>0?i.paid+' of '+r.n+' paid':'ongoing')+(i.next?' · next '+shortDay(i.next.date):'')+'</div></div><div class="a expense">'+huf(r.amount)+'</div></div>';});
+  h+='</div>';
+  h+='<div class="card"><div class="muted" style="font-size:13px">'+state.tx.length+' transactions · '+state.goals.length+' wishlist items · version 22 Oct (recurring)</div></div>';
   return h;
 }
 
@@ -706,6 +758,10 @@ function drawTxSheet(){
     var bal=allocate().pots;
     h+='<label>Paid from your garden (optional)</label><div class="muted" style="font-size:12px;margin:-2px 0 6px">Leaves your monthly budget alone and only reduces the plant.</div><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
   }
+  if(d.type==="expense"&&!d.id&&!d.splits&&!d.fromPot){
+    h+='<label class="chk" style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="f_rep"'+(d.repeat?" checked":"")+' style="width:auto"> Repeat every month</label>';
+    if(d.repeat)h+='<label>Number of payments (leave empty if ongoing)</label><input id="f_repn" type="text" inputmode="numeric" value="'+esc(d.repN||"")+'" placeholder="e.g. 6 for a 6-part instalment"><div class="muted" style="font-size:12px;margin-top:6px">Payments land on the same day each month, starting with the date below. Future ones show as plans.</div>';
+  }
   h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'"><div class="muted" style="font-size:12px;margin-top:6px">A date after today makes this a plan. It doesn\'t change your current numbers until that day.</div>';
   var places=[];state.tx.forEach(function(t){if(t.place&&places.indexOf(t.place)<0)places.push(t.place);});
   h+='<label>Place (optional)</label><input id="f_place" type="text" list="f_places" autocomplete="off" value="'+esc(d.place||"")+'" placeholder="e.g. Lidl"><datalist id="f_places">'+places.sort().map(function(p){return '<option value="'+esc(p)+'">';}).join("")+'</datalist>';
@@ -722,6 +778,7 @@ function readTxForm(){
   var ff=document.getElementById("f_for");draft.listId=ff?ff.value:"";
   var fp=document.getElementById("f_from");draft.fromPot=fp?fp.value:"";
   if(draft.splits){draft.splits.forEach(function(s,i){var c=sheet.querySelector('[data-sc="'+i+'"]'),a=sheet.querySelector('[data-sa="'+i+'"]');if(c)s.cat=c.value;if(a)s.amount=a.value;});}
+  var frp=document.getElementById("f_rep");if(frp){draft.repeat=frp.checked;var frn=document.getElementById("f_repn");if(frn)draft.repN=frn.value;}
   draft.date=document.getElementById("f_date").value;
   draft.place=document.getElementById("f_place").value.trim();
   draft.note=document.getElementById("f_note").value.trim();
@@ -794,7 +851,13 @@ function delList(i){
     state.lists.splice(i,1);save();listsSheet();return;
   }
   var wl=wishLists();
-  if(wl.length<2){alert("You need at least one wishlist.");return;}
+  if(wl.length<2){
+    var n1=state.goals.filter(function(g){return g.listId===l.id;}).length;
+    if(!confirm("Delete “"+l.name+"”?"+(n1?" Its "+n1+" item"+(n1===1?"":"s")+" will be deleted too.":"")))return;
+    state.goals=state.goals.filter(function(g){return g.listId!==l.id;});
+    state.tx.forEach(function(t){if(t.listId===l.id)delete t.listId;});
+    state.lists.splice(i,1);ui.gl="all";save();listsSheet();return;
+  }
   var dest=wl.filter(function(x){return x.id!==l.id;})[0];
   var n=state.goals.filter(function(g){return g.listId===l.id;}).length;
   if(!confirm("Delete “"+l.name+"”?"+(n?" Its "+n+" item"+(n===1?"":"s")+" will move to “"+dest.name+"”.":"")))return;
@@ -815,7 +878,11 @@ function fundSheet(id){
   openSheet(h);
 }
 var gdraft=null;
+function newListSheet(thenItem){
+  openSheet('<h2>New wishlist</h2><div class="muted" style="font-size:13px">For example Furniture, Move-in or Gifts. Items you add live inside a wishlist.</div><label>Name</label><input id="nl_name" type="text" maxlength="40" placeholder="e.g. Furniture"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="nl_save" data-then="'+(thenItem?1:0)+'">Create</button></div>');
+}
 function goalSheet(g){
+  if(!wishLists().length){newListSheet(true);return;}
   gdraft=g?JSON.parse(JSON.stringify(g)):{id:null,name:"",price:"",img:"",url:"",listId:(ui.gl!=="all"&&wishLists().some(function(l){return l.id===ui.gl;}))?ui.gl:wishLists()[0].id,done:false};
   var d=gdraft;
   var h='<h2>'+(d.id?"Edit item":"New wishlist item")+'</h2>';
@@ -886,6 +953,8 @@ app.addEventListener("click",function(e){
     }
     return;
   }
+  if(act==="recopen"){recSheet(t.dataset.rid);return;}
+  if(act==="newlist"){newListSheet(false);return;}
   if(act==="newplant"){openSheet('<h2>New plant</h2><div class="muted" style="font-size:13px">A place to save for something specific, for example a wedding gift or a trip.</div><label>Name</label><input id="np_name" type="text" maxlength="40" placeholder="e.g. Wedding gift"><label>Budget (Ft, optional)</label><input id="np_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 60000"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="np_save">Plant it</button></div>');return;}
   if(act==="plantdone"){var dl=state.lists.filter(function(x){return x.id===t.dataset.pid;})[0];if(!dl)return;
     var bl=allocate().pots[dl.id]||0;
@@ -971,12 +1040,17 @@ sheet.addEventListener("click",function(e){
     if(splits)rec.splits=splits;
     if(draft.type==="saving"&&draft.listId)rec.listId=draft.listId;
     if(draft.type==="expense"&&draft.fromPot)rec.fromPot=draft.fromPot;
+    if(draft.type==="expense"&&!draft.id&&!splits&&!draft.fromPot&&draft.repeat){
+      var rn=Math.max(0,parseInt(draft.repN,10)||0);
+      state.rec.push({id:uid(),name:(draft.place||draft.note||rcat).slice(0,40),amount:amt,cat:rcat,day:+draft.date.slice(8,10),start:draft.date,n:rn,note:draft.place?draft.note:"",skip:[]});
+      syncRec();ui.month=draft.date.slice(0,7);save();closeSheet();render();return;
+    }
     var idx=state.tx.findIndex(function(x){return x.id===rec.id;});
     if(idx>-1)state.tx[idx]=rec;else state.tx.push(rec);
     ui.month=rec.date.slice(0,7);
     save();closeSheet();render();return;
   }
-  if(b.id==="f_del"){if(confirm("Delete this transaction?")){state.tx=state.tx.filter(function(x){return x.id!==draft.id;});save();closeSheet();render();}return;}
+  if(b.id==="f_del"){if(confirm("Delete this transaction?")){var dtx=state.tx.filter(function(x){return x.id===draft.id;})[0];if(dtx&&dtx.recId){var dr=state.rec.filter(function(r){return r.id===dtx.recId;})[0];if(dr){dr.skip=dr.skip||[];dr.skip.push(dtx.recK);}}state.tx=state.tx.filter(function(x){return x.id!==draft.id;});save();closeSheet();render();}return;}
   if(b.dataset.lup!==undefined||b.dataset.ldown!==undefined){
     var li=+(b.dataset.lup!==undefined?b.dataset.lup:b.dataset.ldown),dir=b.dataset.lup!==undefined?-1:1,kind=!!state.lists[li].pot,lj=li;do{lj+=dir;}while(lj>=0&&lj<state.lists.length&&!!state.lists[lj].pot!==kind);
     if(lj>=0&&lj<state.lists.length){var lt=state.lists[li];state.lists[li]=state.lists[lj];state.lists[lj]=lt;save();listsSheet();}
@@ -992,6 +1066,14 @@ sheet.addEventListener("click",function(e){
     if(eurPot()){closeSheet();return;}
     var ne={id:uid(),name:en.slice(0,40),pot:true,cur:"EUR",budget:Math.max(0,num(document.getElementById("ne_budget").value)||0)};
     state.eurRate=er;state.lists.push(ne);save();closeSheet();ui.pot=ne.id;ui.tab="savings";render();window.scrollTo(0,0);return;
+  }
+  if(b.dataset.act==="recstop"){recStop(b.dataset.rid);return;}
+  if(b.dataset.act==="recdel"){recDel(b.dataset.rid);return;}
+  if(b.id==="nl_save"){
+    var nn=document.getElementById("nl_name").value.trim();if(!nn){alert("Give the wishlist a name.");return;}
+    state.lists.push({id:uid(),name:nn.slice(0,40)});save();closeSheet();render();
+    if(b.dataset.then==="1")goalSheet();
+    return;
   }
   if(b.id==="np_save"){
     var nm=document.getElementById("np_name").value.trim();if(!nm){alert("Give the plant a name.");return;}
@@ -1024,6 +1106,7 @@ sheet.addEventListener("input",function(e){
   if(e.target.id==="f_amount"||e.target.id==="f_rate")updateEqv();
 });
 sheet.addEventListener("change",function(e){
+  if(e.target.id==="f_rep"){readTxForm();drawTxSheet();return;}
   if(e.target.id==="f_for"){var wasE=isEurId(draft.listId);readTxForm();if(wasE!==isEurId(draft.listId)){drawTxSheet();}return;}
   if(e.target.dataset.ln!==undefined){var idx=+e.target.dataset.ln,v=e.target.value.trim();if(v){state.lists[idx].name=v.slice(0,40);save();}else e.target.value=state.lists[idx].name;return;}
   if(e.target.id==="g_file"&&e.target.files[0]){
@@ -1058,7 +1141,7 @@ function importWishlist(text){
       var digits=String(it.price==null?"":it.price).replace(/[^\d]/g,"");
       if(typeof it.price==="number"&&isFinite(it.price))price=Math.round(it.price);else if(digits)price=parseInt(digits,10);
     }
-    var L=listByName(it.list||it.category)||((ui.gl!=="all"&&state.lists.filter(function(x){return x.id===ui.gl;})[0])||wishLists()[wishLists().length-1]);
+    var L=listByName(it.list||it.category)||((ui.gl!=="all"&&state.lists.filter(function(x){return x.id===ui.gl;})[0])||wishLists()[wishLists().length-1]||listByName("Wishlist"));
     var g={id:uid(),name:name.slice(0,120),price:price>0?price:0,img:"",url:url,listId:L.id,done:false};
     if(!(price>0)){noPrice++;if(it.price!=null&&cur!=="HUF"&&cur!=="FT")g.hint="List price: "+it.price+" "+cur;}
     var im=String(it.image||it.image_url||it.photo||"").trim();
