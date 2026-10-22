@@ -120,8 +120,8 @@ svg text{fill:var(--muted);font:11px -apple-system,system-ui,sans-serif}
 <nav id="nav">
   <button data-tab="overview"><span class="ic">◉</span>Overview</button>
   <button data-tab="tx"><span class="ic">≡</span>Transactions</button>
-  <button data-tab="goals"><span class="ic">★</span>Wishlist</button>
   <button data-tab="savings"><span class="ic">✿</span>Savings</button>
+  <button data-tab="goals"><span class="ic">★</span>Wishlist</button>
   <button data-tab="more"><span class="ic">⋯</span>More</button>
 </nav>
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
@@ -136,9 +136,11 @@ var CATS={
   saving:[["🐖","Savings"]]
 };
 var ICON={};
-Object.keys(CATS).forEach(function(k){CATS[k].forEach(function(c){ICON[c[1]]=c[0];});});
+function allCats(type){return CATS[type].concat((state.cats&&state.cats[type])||[]);}
+function rebuildIcons(){ICON={};Object.keys(CATS).forEach(function(k){allCats(k).forEach(function(c){ICON[c[1]]=c[0];});});}
 
-var state={tx:[],goals:[],lists:[],rec:[]};
+var state={tx:[],goals:[],lists:[],rec:[],cats:{expense:[],income:[]}};
+rebuildIcons();
 var ui={tab:"overview",month:ym(new Date()),catFilter:null,txView:"date",gl:"all",pot:null,noClick:0};
 
 // Storage: IndexedDB (hundreds of MB, survives reloads) with the old localStorage copy as the fallback and the migration source.
@@ -157,7 +159,7 @@ function toast(msg){
   clearTimeout(toast.h);toast.h=setTimeout(function(){t.style.display="none";},12000);
 }
 function loadFrom(raw){
-  try{var d=typeof raw==="string"?JSON.parse(raw):raw;if(d){state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;state.eurRate=d.eurRate>0?d.eurRate:undefined;state.rec=Array.isArray(d.rec)?d.rec:[];}}catch(e){}
+  try{var d=typeof raw==="string"?JSON.parse(raw):raw;if(d){state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;state.eurRate=d.eurRate>0?d.eurRate:undefined;state.rec=Array.isArray(d.rec)?d.rec:[];state.cats=d.cats||null;}}catch(e){}
   var needs=(state.migr||0)<4&&(state.tx.length||state.goals.length||state.lists.length);
   normalize();var syn=syncRec();if(needs||syn)save();
 }
@@ -257,6 +259,9 @@ function lines(t){return t.splits&&t.splits.length?t.splits:[{cat:t.cat,amount:t
 // Wishlist lists (Move-in, First shopping, Furniture, ...). Every item belongs to one list.
 function normalize(){
   if(!Array.isArray(state.rec))state.rec=[];
+  if(!state.cats||typeof state.cats!=="object")state.cats={};
+  if(!Array.isArray(state.cats.expense))state.cats.expense=[];if(!Array.isArray(state.cats.income))state.cats.income=[];
+  rebuildIcons();
   if(!Array.isArray(state.lists)||!state.lists.length){
     state.lists=[["p_presents","Presents"],["p_health","Health"],["p_travel","Travel & leisure"],["p_clothing","Clothing & shopping"],["p_revolut","Revolut"],["p_misc","Miscellaneous"]].map(function(x){return {id:x[0],name:x[1],pot:true};});
     state.migr=4;
@@ -686,6 +691,14 @@ function viewMore(){
   h+='<button class="btn sec" data-act="restore">Restore from backup</button><input type="file" id="restoreFile" accept="application/json,.json" class="hidden"></div>';
   h+='<div class="card"><div class="eyebrow">Wishlist import</div><div class="muted" style="font-size:14px;margin:6px 0 12px">Add several wishlist items at once from the JSON an AI filled in for you (name, price, photo, link). Items already on your wishlist with the same link are skipped.</div>';
   h+='<button class="btn" data-act="wl-paste">Paste JSON</button><div style="height:8px"></div><button class="btn sec" data-act="wl-file">Choose JSON file</button><input type="file" id="wlFile" accept="application/json,.json,.txt" class="hidden"></div>';
+  h+='<div class="card"><div class="eyebrow">Categories</div><div class="muted" style="font-size:14px;margin:6px 0 10px">Your own groups for spending and income. They appear in the Category menu when you add a transaction.</div>';
+  [["expense","Spending"],["income","Income"]].forEach(function(ty){
+    h+='<div class="muted" style="font-size:13px;margin-top:8px">'+ty[1]+'</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0">';
+    CATS[ty[0]].forEach(function(c){h+='<span style="padding:6px 10px;border-radius:10px;background:var(--bg);font-size:14px">'+c[0]+' '+esc(c[1])+'</span>';});
+    state.cats[ty[0]].forEach(function(c,i){h+='<span style="padding:6px 6px 6px 10px;border-radius:10px;background:var(--bg);font-size:14px">'+esc(c[0])+' '+esc(c[1])+' <button class="iconbtn" style="padding:0 6px" data-act="catdel" data-ct="'+ty[0]+'" data-ci="'+i+'" aria-label="Remove">×</button></span>';});
+    h+='</div>';
+  });
+  h+='<label>New category</label><div class="row" style="gap:8px"><input id="cat_ic" type="text" maxlength="2" value="🏷️" style="width:56px;text-align:center"><input id="cat_nm" type="text" maxlength="24" placeholder="e.g. Pets" style="flex:1"></div><select id="cat_ty" style="margin-top:8px"><option value="expense">Spending</option><option value="income">Income</option></select><button class="btn sec" style="margin-top:10px" data-act="catadd">Add category</button></div>';
   h+='<div class="card"><div class="eyebrow">Recurring payments</div>';
   if(!state.rec.length)h+='<div class="muted" style="font-size:14px;margin-top:6px">Subscriptions, instalments (BNPL) and fixed fees. Add one with + → Expense → “Repeat every month”.</div>';
   state.rec.forEach(function(r){var i=recInfo(r);h+='<div class="tx" data-act="recopen" data-rid="'+r.id+'"><div class="dot">🔁</div><div class="mid"><div class="t">'+esc(r.name)+'</div><div class="s">'+(r.n>0?i.paid+' of '+r.n+' paid':'ongoing')+(i.next?' · next '+shortDay(i.next.date):'')+'</div></div><div class="a expense">'+huf(r.amount)+'</div></div>';});
@@ -706,7 +719,7 @@ function cleanUrl(u){
   if(!/^https?:\/\//i.test(u))u="https://"+u;
   try{var p=new URL(u);if((p.protocol!=="http:"&&p.protocol!=="https:")||p.hostname.indexOf(".")<0)return null;return p.href;}catch(e){return null;}
 }
-function catOptions(type,sel){return CATS[type].map(function(c){return '<option '+(c[1]===sel?"selected":"")+'>'+c[1]+'</option>';}).join("");}
+function catOptions(type,sel){return allCats(type).map(function(c){return '<option '+(c[1]===sel?"selected":"")+'>'+esc(c[1])+'</option>';}).join("")+(type==="saving"?"":'<option value="__new">+ New category…</option>');}
 function remainder(){
   var tot=num(document.getElementById("f_amount").value)||0,sum=0;
   sheet.querySelectorAll("[data-sa]").forEach(function(i){sum+=num(i.value)||0;});
@@ -953,6 +966,17 @@ app.addEventListener("click",function(e){
     }
     return;
   }
+  if(act==="catadd"){
+    var cn=document.getElementById("cat_nm").value.trim(),ci=document.getElementById("cat_ic").value.trim()||"🏷️",ct=document.getElementById("cat_ty").value;
+    if(!cn){alert("Give the category a name.");return;}
+    if(allCats(ct).some(function(c){return c[1].toLowerCase()===cn.toLowerCase();})){alert("That category already exists.");return;}
+    state.cats[ct].push([ci,cn.slice(0,24)]);rebuildIcons();save();render();return;
+  }
+  if(act==="catdel"){
+    var arr=state.cats[t.dataset.ct],c0=arr&&arr[+t.dataset.ci];if(!c0)return;
+    if(confirm("Remove the category “"+c0[1]+"”? Past transactions keep the name.")){arr.splice(+t.dataset.ci,1);rebuildIcons();save();render();}
+    return;
+  }
   if(act==="recopen"){recSheet(t.dataset.rid);return;}
   if(act==="newlist"){newListSheet(false);return;}
   if(act==="newplant"){openSheet('<h2>New plant</h2><div class="muted" style="font-size:13px">A place to save for something specific, for example a wedding gift or a trip.</div><label>Name</label><input id="np_name" type="text" maxlength="40" placeholder="e.g. Wedding gift"><label>Budget (Ft, optional)</label><input id="np_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 60000"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="np_save">Plant it</button></div>');return;}
@@ -1106,6 +1130,17 @@ sheet.addEventListener("input",function(e){
   if(e.target.id==="f_amount"||e.target.id==="f_rate")updateEqv();
 });
 sheet.addEventListener("change",function(e){
+  if(e.target.id==="f_cat"&&e.target.value==="__new"||(e.target.dataset.sc!==undefined&&e.target.value==="__new")){
+    var sel0=e.target,prevCat=draft.cat,prevSp=draft.splits?draft.splits.map(function(x){return x.cat;}):null;
+    var nm=(window.prompt("Name of the new category")||"").trim().slice(0,24),ty0=draft.type==="income"?"income":"expense";
+    readTxForm();draft.cat=prevCat;if(prevSp)draft.splits.forEach(function(x,i){x.cat=prevSp[i];});
+    if(nm){
+      var ex=allCats(ty0).filter(function(c){return c[1].toLowerCase()===nm.toLowerCase();})[0];
+      if(!ex){state.cats[ty0].push(["🏷️",nm]);rebuildIcons();save();ex=["🏷️",nm];}
+      if(sel0.id==="f_cat")draft.cat=ex[1];else{var si=+sel0.dataset.sc;draft.splits[si].cat=ex[1];}
+    }
+    drawTxSheet();return;
+  }
   if(e.target.id==="f_rep"){readTxForm();drawTxSheet();return;}
   if(e.target.id==="f_for"){var wasE=isEurId(draft.listId);readTxForm();if(wasE!==isEurId(draft.listId)){drawTxSheet();}return;}
   if(e.target.dataset.ln!==undefined){var idx=+e.target.dataset.ln,v=e.target.value.trim();if(v){state.lists[idx].name=v.slice(0,40);save();}else e.target.value=state.lists[idx].name;return;}
