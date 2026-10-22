@@ -177,6 +177,7 @@ function pad(n){return n<10?"0"+n:""+n;}
 function ym(d){return d.getFullYear()+"-"+pad(d.getMonth()+1);}
 function today(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());}
 function huf(n){return Math.round(n).toLocaleString("hu-HU").replace(/\u00a0/g," ")+" Ft";}
+function num(v){return Number.parseFloat(String(v==null?"":v).replace(/\s/g,"").replace(",","."));}
 function eur(n){return (Math.round(n*100)/100).toLocaleString("hu-HU",{maximumFractionDigits:2}).replace(/\u00a0/g," ")+" €";}
 function isEurId(id){var l=state.lists.filter(function(x){return x.id===id;})[0];return !!(l&&l.cur==="EUR");}
 function fmtP(l,n){return l&&l.cur==="EUR"?eur(n):huf(n);}
@@ -625,13 +626,13 @@ function cleanUrl(u){
 }
 function catOptions(type,sel){return CATS[type].map(function(c){return '<option '+(c[1]===sel?"selected":"")+'>'+c[1]+'</option>';}).join("");}
 function remainder(){
-  var tot=parseFloat(document.getElementById("f_amount").value)||0,sum=0;
-  sheet.querySelectorAll("[data-sa]").forEach(function(i){sum+=parseFloat(i.value)||0;});
+  var tot=num(document.getElementById("f_amount").value)||0,sum=0;
+  sheet.querySelectorAll("[data-sa]").forEach(function(i){sum+=num(i.value)||0;});
   return {tot:tot,r:Math.round((tot-sum)*100)/100};
 }
 function updateEqv(){
   var e=document.getElementById("f_eqv");if(!e)return;
-  var a=parseFloat(document.getElementById("f_amount").value)||0,r=parseFloat(document.getElementById("f_rate").value)||0;
+  var a=num(document.getElementById("f_amount").value)||0,r=num(document.getElementById("f_rate").value)||0;
   e.textContent=a>0&&r>0?"= "+huf(Math.round(a*r))+" taken from your Ft income":"Enter the rate to see the Ft value.";
 }
 function updateRem(){
@@ -656,7 +657,7 @@ function drawTxSheet(){
   [["expense","Expense"],["income","Income"],["saving","Saved"]].forEach(function(p){h+='<button data-type="'+p[0]+'" class="'+(d.type===p[0]?"on":"")+'">'+p[1]+'</button>';});
   h+='</div>';
   var isE=d.type==="saving"&&isEurId(d.listId);
-  h+='<label>Amount ('+(isE?"EUR":"Ft")+')</label><input id="f_amount" type="number" inputmode="decimal" min="0" step="1" value="'+esc(d.amount)+'" placeholder="0">';
+  h+='<label>Amount ('+(isE?"EUR":"Ft")+')</label><input id="f_amount" type="text" inputmode="decimal" value="'+esc(d.amount)+'" placeholder="0">';
   if(d.type==="expense"&&d.splits){
     h+='<label>Categories</label>';
     d.splits.forEach(function(s,i){h+='<div class="splitrow"><select data-sc="'+i+'">'+catOptions("expense",s.cat)+'</select><input data-sa="'+i+'" type="number" inputmode="decimal" min="0" step="1" placeholder="Ft" value="'+esc(s.amount)+'"><button class="iconbtn" data-srm="'+i+'" aria-label="Remove line">×</button></div>';});
@@ -669,7 +670,7 @@ function drawTxSheet(){
   if(d.type==="saving"){
     var opt=function(l){return '<option value="'+l.id+'"'+(d.listId===l.id?" selected":"")+'>'+esc(l.name)+'</option>';};
     h+='<label>Save for</label><select id="f_for"><option value="">Any wishlist (general)</option><optgroup label="Wishlists">'+wishLists().map(opt).join("")+'</optgroup><optgroup label="Garden">'+potsFor(d.listId).map(opt).join("")+'</optgroup></select>';
-    if(isE)h+='<label>Rate (Ft per 1 EUR)</label><input id="f_rate" type="number" inputmode="decimal" min="0" step="0.01" value="'+esc(d.rate||"")+'" placeholder="e.g. 395"><div class="muted" id="f_eqv" style="font-size:13px;margin-top:6px"></div>';
+    if(isE)h+='<label>Rate (Ft per 1 EUR)</label><input id="f_rate" type="text" inputmode="decimal" value="'+esc(d.rate||"")+'" placeholder="e.g. 395"><div class="muted" id="f_eqv" style="font-size:13px;margin-top:6px"></div>';
   }
   if(d.type==="expense"&&potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).length){
     var bal=allocate().pots;
@@ -730,8 +731,8 @@ function plantSheet(id){
   var f=function(n){return fmtP(l,n);},isE=l.cur==="EUR",bal=allocate().pots[id]||0,b=l.budget||0,p=b>0?bal/b:0;
   var h='<h2>'+esc(l.name)+'</h2><div style="text-align:center">'+plantSvg(p,140)+'</div>';
   h+='<div style="text-align:center;margin-bottom:4px"><strong>'+f(bal)+'</strong>'+(b>0?' <span class="muted">of '+f(b)+' · '+(p>=1?'in bloom 🌸':Math.min(99,Math.floor(p*100))+'%')+'</span>':'')+'</div>';
-  h+='<label>Budget ('+(isE?"EUR":"Ft")+')</label><input id="pl_budget" type="number" inputmode="decimal" min="0" step="1" value="'+(b>0?b:'')+'" placeholder="e.g. 100000">';
-  if(isE)h+='<label>Rate (Ft per 1 EUR)</label><input id="pl_rate" type="number" inputmode="decimal" min="0" step="0.01" value="'+(state.eurRate||"")+'" placeholder="e.g. 395"><div class="muted" style="font-size:13px;margin-top:6px">Used to show the Ft value of this plant. Each saving keeps the rate you typed when you added it.</div>';
+  h+='<label>Budget ('+(isE?"EUR":"Ft")+')</label><input id="pl_budget" type="text" inputmode="decimal" value="'+(b>0?b:'')+'" placeholder="e.g. 100000">';
+  if(isE)h+='<label>Rate (Ft per 1 EUR)</label><input id="pl_rate" type="text" inputmode="decimal" value="'+(state.eurRate||"")+'" placeholder="e.g. 395"><div class="muted" style="font-size:13px;margin-top:6px">Used to show the Ft value of this plant. Each saving keeps the rate you typed when you added it.</div>';
   h+='<div class="muted" style="font-size:13px;margin-top:8px">The plant grows as the balance reaches this budget, and flowers once it is reached.</div>';
   h+='<div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="pl_save" data-pid="'+id+'">Save</button></div>';
   openSheet(h);
@@ -841,7 +842,7 @@ app.addEventListener("click",function(e){
   if(act==="csv"){exportCsv();return;}
   if(act==="plantoggle"){state.plan=!state.plan;save();render();return;}
   if(act==="lists"){listsSheet();return;}
-  if(act==="neweur"){openSheet('<h2>EUR savings plant</h2><div class="muted" style="font-size:13px">Save in euros. Each saving is converted to Ft at the rate you type and comes out of your Ft income that month.</div><label>Name</label><input id="ne_name" type="text" maxlength="40" value="EUR savings"><label>Budget (EUR, optional)</label><input id="ne_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 1000"><label>Rate (Ft per 1 EUR)</label><input id="ne_rate" type="number" inputmode="decimal" min="0" step="0.01" value="'+(state.eurRate||"")+'" placeholder="e.g. 395"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="ne_save">Plant it</button></div>');return;}
+  if(act==="neweur"){openSheet('<h2>EUR savings plant</h2><div class="muted" style="font-size:13px">Save in euros. Each saving is converted to Ft at the rate you type and comes out of your Ft income that month.</div><label>Name</label><input id="ne_name" type="text" maxlength="40" value="EUR savings"><label>Budget (EUR, optional)</label><input id="ne_budget" type="text" inputmode="decimal" placeholder="e.g. 1000"><label>Rate (Ft per 1 EUR)</label><input id="ne_rate" type="text" inputmode="decimal" value="'+(state.eurRate||"")+'" placeholder="e.g. 395"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="ne_save">Plant it</button></div>');return;}
   if(act==="newplant"){openSheet('<h2>New plant</h2><div class="muted" style="font-size:13px">A place to save for something specific, for example a wedding gift or a trip.</div><label>Name</label><input id="np_name" type="text" maxlength="40" placeholder="e.g. Wedding gift"><label>Budget (Ft, optional)</label><input id="np_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 60000"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="np_save">Plant it</button></div>');return;}
   if(act==="plantdone"){var dl=state.lists.filter(function(x){return x.id===t.dataset.pid;})[0];if(!dl)return;
     var bl=allocate().pots[dl.id]||0;
@@ -902,14 +903,14 @@ sheet.addEventListener("click",function(e){
   }
   if(b.id==="f_save"){
     readTxForm();
-    var amt=parseFloat(draft.amount);
+    var amt=num(draft.amount);
     if(!(amt>0)){alert("Enter an amount.");return;}
     if(!draft.date){alert("Pick a date.");return;}
     var splits=null,rcat=draft.cat;
     if(draft.type==="expense"&&draft.splits){
       var merged=[];
       draft.splits.forEach(function(s){
-        var a=parseFloat(s.amount)||0;if(a<=0)return;
+        var a=num(s.amount)||0;if(a<=0)return;
         var ex=merged.filter(function(m){return m.cat===s.cat;})[0];
         if(ex)ex.amount+=a;else merged.push({cat:s.cat,amount:a});
       });
@@ -920,7 +921,7 @@ sheet.addEventListener("click",function(e){
     }
     var rec={id:draft.id||uid(),type:draft.type,amount:amt,cat:rcat,date:draft.date,place:draft.place,note:draft.note};
     if(draft.type==="saving"&&isEurId(draft.listId)){
-      var rt=parseFloat(draft.rate);
+      var rt=num(draft.rate);
       if(!(rt>0)){alert("Enter the rate (Ft per 1 EUR).");return;}
       rec.eur=amt;rec.rate=rt;rec.amount=Math.round(amt*rt);state.eurRate=rt;
     }
@@ -942,19 +943,19 @@ sheet.addEventListener("click",function(e){
   if(b.dataset.ftog){var fi=fdraft.pots.indexOf(b.dataset.ftog);if(fi<0)fdraft.pots.push(b.dataset.ftog);else fdraft.pots.splice(fi,1);fundSheet(null);return;}
   if(b.id==="f_fsave"){var fl2=state.lists.filter(function(x){return x.id===fdraft.id;})[0];if(fl2){fl2.pots=fdraft.pots;save();}closeSheet();return;}
   if(b.id==="ne_save"){
-    var en=document.getElementById("ne_name").value.trim(),er=parseFloat(document.getElementById("ne_rate").value);
+    var en=document.getElementById("ne_name").value.trim(),er=num(document.getElementById("ne_rate").value);
     if(!en){alert("Give the plant a name.");return;}
     if(!(er>0)){alert("Enter the rate (Ft per 1 EUR).");return;}
     if(eurPot()){closeSheet();return;}
-    var ne={id:uid(),name:en.slice(0,40),pot:true,cur:"EUR",budget:Math.max(0,parseFloat(document.getElementById("ne_budget").value)||0)};
+    var ne={id:uid(),name:en.slice(0,40),pot:true,cur:"EUR",budget:Math.max(0,num(document.getElementById("ne_budget").value)||0)};
     state.eurRate=er;state.lists.push(ne);save();closeSheet();ui.pot=ne.id;ui.tab="savings";render();window.scrollTo(0,0);return;
   }
   if(b.id==="np_save"){
     var nm=document.getElementById("np_name").value.trim();if(!nm){alert("Give the plant a name.");return;}
-    var nb=Math.max(0,parseFloat(document.getElementById("np_budget").value)||0),np={id:uid(),name:nm.slice(0,40),pot:true,budget:nb};
+    var nb=Math.max(0,num(document.getElementById("np_budget").value)||0),np={id:uid(),name:nm.slice(0,40),pot:true,budget:nb};
     state.lists.push(np);save();closeSheet();ui.pot=np.id;render();window.scrollTo(0,0);return;
   }
-  if(b.id==="pl_save"){var pl0=state.lists.filter(function(x){return x.id===b.dataset.pid;})[0];if(pl0){pl0.budget=Math.max(0,parseFloat(document.getElementById("pl_budget").value)||0);var prE=document.getElementById("pl_rate");if(prE&&parseFloat(prE.value)>0)state.eurRate=parseFloat(prE.value);save();}closeSheet();return;}
+  if(b.id==="pl_save"){var pl0=state.lists.filter(function(x){return x.id===b.dataset.pid;})[0];if(pl0){pl0.budget=Math.max(0,num(document.getElementById("pl_budget").value)||0);var prE=document.getElementById("pl_rate");if(prE&&num(prE.value)>0)state.eurRate=num(prE.value);save();}closeSheet();return;}
   if(b.id==="p_add"){var pi=document.getElementById("p_new"),pn=pi.value.trim();if(!pn)return;state.lists.push({id:uid(),name:pn.slice(0,40),pot:true});save();listsSheet();return;}
   if(b.id==="l_add"){var ni=document.getElementById("l_new"),nm=ni.value.trim();if(!nm)return;state.lists.push({id:uid(),name:nm.slice(0,40)});save();listsSheet();return;}
   if(b.id==="wl_go"){if(importWishlist(document.getElementById("wl_text").value))closeSheet();return;}
@@ -965,7 +966,7 @@ sheet.addEventListener("click",function(e){
     if(lk===null){alert("That link doesn't look right.");return;}
     gdraft.url=lk;
     gdraft.listId=document.getElementById("g_list").value;
-    var p=parseFloat(document.getElementById("g_price").value);
+    var p=num(document.getElementById("g_price").value);
     if(!gdraft.name){alert("Give the item a name.");return;}
     if(!(p>0)){alert("Enter a price.");return;}
     gdraft.price=p;
