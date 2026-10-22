@@ -157,7 +157,7 @@ function toast(msg){
   clearTimeout(toast.h);toast.h=setTimeout(function(){t.style.display="none";},12000);
 }
 function loadFrom(raw){
-  try{var d=typeof raw==="string"?JSON.parse(raw):raw;if(d){state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;}}catch(e){}
+  try{var d=typeof raw==="string"?JSON.parse(raw):raw;if(d){state.tx=(d.tx||[]).map(function(t){if(t.cat==="Fun")t.cat="Entertainment";return t;});state.goals=d.goals||[];state.lists=d.lists||[];state.migr=d.migr;state.plan=!!d.plan;state.eurRate=d.eurRate>0?d.eurRate:undefined;}}catch(e){}
   var needs=(state.migr||0)<4&&(state.tx.length||state.goals.length||state.lists.length);
   normalize();if(needs)save();
 }
@@ -177,6 +177,11 @@ function pad(n){return n<10?"0"+n:""+n;}
 function ym(d){return d.getFullYear()+"-"+pad(d.getMonth()+1);}
 function today(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());}
 function huf(n){return Math.round(n).toLocaleString("hu-HU").replace(/\u00a0/g," ")+" Ft";}
+function eur(n){return (Math.round(n*100)/100).toLocaleString("hu-HU",{maximumFractionDigits:2}).replace(/\u00a0/g," ")+" €";}
+function isEurId(id){var l=state.lists.filter(function(x){return x.id===id;})[0];return !!(l&&l.cur==="EUR");}
+function fmtP(l,n){return l&&l.cur==="EUR"?eur(n):huf(n);}
+function toHuf(l,n){return l&&l.cur==="EUR"?n*(state.eurRate||0):n;}
+function eurPot(){return state.lists.filter(function(l){return l.pot&&l.cur==="EUR";})[0];}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function monthLabel(m){var p=m.split("-");return new Date(+p[0],+p[1]-1,1).toLocaleDateString("en-GB",{month:"long",year:"numeric"});}
 function shiftMonth(m,d){var p=m.split("-");return ym(new Date(+p[0],+p[1]-1+d,1));}
@@ -266,11 +271,11 @@ function allocate(){
   state.tx.forEach(function(t){
     if(!counts(t))return;
     if(t.type==="saving"){
-      if(t.listId&&potBal[t.listId]!==undefined)potBal[t.listId]+=t.amount;
+      if(t.listId&&potBal[t.listId]!==undefined)potBal[t.listId]+=(isEurId(t.listId)?(t.eur||0):t.amount);
       else{totalSaved+=t.amount;if(t.listId&&wid[t.listId])savedTo[t.listId]=(savedTo[t.listId]||0)+t.amount;else G+=t.amount;}
     }else if(t.type==="expense"&&t.fromPot&&potBal[t.fromPot]!==undefined)potBal[t.fromPot]-=t.amount;
   });
-  potLists().forEach(function(l){potRem[l.id]=Math.max(0,potBal[l.id]);});
+  potLists().forEach(function(l){if(l.cur!=="EUR")potRem[l.id]=Math.max(0,potBal[l.id]);});
   var out={totalSaved:totalSaved,items:{},lists:{},pots:potBal};
   // each wishlist is funded by: money saved directly for it, then the savings pots linked to it, then general savings
   wl.forEach(function(l){
@@ -349,11 +354,11 @@ function viewOverview(){
 
   var ap=allocate(),pl=potLists();
   if(pl.length){
-    var ptot=0;pl.forEach(function(l){ptot+=ap.pots[l.id]||0;});
+    var ptot=0;pl.forEach(function(l){ptot+=toHuf(l,ap.pots[l.id]||0);});
     h+='<div class="card"><div class="row spread"><div class="eyebrow">Garden</div><strong>'+huf(ptot)+'</strong></div><div class="garden">';
     pl.forEach(function(l){
       var bal=ap.pots[l.id]||0,bud=l.budget||0,pr=bud>0?bal/bud:0;
-      h+='<div class="plant" data-plant="'+l.id+'">'+plantSvg(pr,92)+'<div class="pn">'+esc(l.name)+'</div><div class="pa">'+(bud>0?huf(bal)+' / '+huf(bud):huf(bal)+' · set a budget')+'</div>';
+      h+='<div class="plant" data-plant="'+l.id+'">'+plantSvg(pr,92)+'<div class="pn">'+esc(l.name)+'</div><div class="pa">'+(bud>0?fmtP(l,bal)+' / '+fmtP(l,bud):fmtP(l,bal)+' · set a budget')+'</div>';
       if(bud>0)h+='<div class="bar"><i style="width:'+Math.min(100,Math.max(0,pr*100))+'%;background:var(--income)"></i></div><div class="pa" style="margin-top:4px">'+(pr>=1?'In bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%')+'</div>';
       h+='</div>';
     });
@@ -410,7 +415,7 @@ function viewTx(){
       sub=t.splits.map(function(l){return l.cat;}).join(" · ");ico="🧾";ttl=t.place||t.note||"Split receipt";
       if(cf){amt=0;t.splits.forEach(function(l){if(l.cat===cf)amt+=l.amount;});sub="of "+huf(t.amount)+" receipt · "+sub;}
     }
-    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm:"")+(t.place&&t.note?" · "+t.note:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
+    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm:"")+(t.place&&t.note?" · "+t.note:"")+(t.eur?" · "+eur(t.eur)+" at "+t.rate:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
   });
   if(open)h+='</div>';
   return h;
@@ -475,7 +480,7 @@ function potMoves(id){
   var m=[];
   state.tx.forEach(function(t,i){
     if(!counts(t))return;
-    if(t.type==="saving"&&t.listId===id)m.push({t:t,amt:t.amount,i:i});
+    if(t.type==="saving"&&t.listId===id)m.push({t:t,amt:(isEurId(id)?(t.eur||0):t.amount),i:i});
     else if(t.type==="expense"&&t.fromPot===id)m.push({t:t,amt:-t.amount,i:i});
   });
   m.sort(function(a,b){return a.t.date<b.t.date?-1:a.t.date>b.t.date?1:a.i-b.i;});
@@ -486,7 +491,7 @@ function plannedMoves(id){
   if(state.plan)return m;
   state.tx.forEach(function(t,i){
     if(!isPlanned(t))return;
-    if(t.type==="saving"&&t.listId===id)m.push({t:t,amt:t.amount,i:i});
+    if(t.type==="saving"&&t.listId===id)m.push({t:t,amt:(isEurId(id)?(t.eur||0):t.amount),i:i});
     else if(t.type==="expense"&&t.fromPot===id)m.push({t:t,amt:-t.amount,i:i});
   });
   m.sort(function(a,b){return a.t.date<b.t.date?-1:a.t.date>b.t.date?1:a.i-b.i;});
@@ -503,31 +508,32 @@ function viewSavings(){
   if(ui.pot&&!allPots().some(function(l){return l.id===ui.pot;}))ui.pot=null;
   if(ui.pot)return viewPot(ui.pot,a);
   var tb=0,tbud=0,td=0,tw=0;
-  var rows=pl.map(function(l){var st=potStats(l.id,a);tb+=st.bal;tbud+=(l.budget||0);td+=st.dep;tw+=st.wd+st.wishUsed;return {l:l,st:st};});
+  var rows=pl.map(function(l){var st=potStats(l.id,a);tb+=toHuf(l,st.bal);tbud+=toHuf(l,l.budget||0);td+=toHuf(l,st.dep);tw+=toHuf(l,st.wd+st.wishUsed);return {l:l,st:st};});
   var h='<div class="eyebrow">Garden</div><h1>Savings</h1>'+planToggle();
   h+='<div class="card"><div class="muted" style="font-size:13px">In your garden now</div><div class="big saving">'+huf(tb)+'</div>';
   h+='<div class="grid3" style="margin-top:14px"><div><div class="v">'+huf(td)+'</div><div class="l">Saved in total</div></div><div><div class="v expense">'+huf(tw)+'</div><div class="l">Used so far</div></div><div><div class="v">'+(tbud>0?huf(tbud):"–")+'</div><div class="l">Total budgets</div></div></div></div>';
   if(!pl.length)h+='<div class="card empty">No plants in your garden. Add one below.</div>';
   rows.forEach(function(r){
     var l=r.l,st=r.st,bud=l.budget||0,pr=bud>0?st.bal/bud:0;
-    h+='<div class="card potcard" data-pot="'+l.id+'" data-sort="pots" data-sid="'+l.id+'"><div class="row" style="align-items:center">'+plantSvg(pr,56)+'<div style="flex:1;min-width:0"><div class="row spread"><strong>'+esc(l.name)+'</strong><span class="'+(st.bal<0?"expense":"")+'" style="font-weight:650">'+huf(st.bal)+'</span></div>';
-    h+='<div class="muted" style="font-size:13px;margin:2px 0 6px">'+(bud>0?'Budget '+huf(bud)+' · '+(pr>=1?'in bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%'):'No budget set')+'</div>';
+    h+='<div class="card potcard" data-pot="'+l.id+'" data-sort="pots" data-sid="'+l.id+'"><div class="row" style="align-items:center">'+plantSvg(pr,56)+'<div style="flex:1;min-width:0"><div class="row spread"><strong>'+esc(l.name)+'</strong><span class="'+(st.bal<0?"expense":"")+'" style="font-weight:650">'+fmtP(l,st.bal)+'</span></div>';
+    h+='<div class="muted" style="font-size:13px;margin:2px 0 6px">'+(bud>0?'Budget '+fmtP(l,bud)+' · '+(pr>=1?'in bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%'):'No budget set')+'</div>';
     if(bud>0)h+='<div class="bar"><i style="width:'+Math.min(100,Math.max(0,pr*100))+'%;background:var(--income)"></i></div>';
-    h+='<div class="muted" style="font-size:12px;margin-top:6px">Saved '+huf(st.dep)+' · Used '+huf(st.wd+st.wishUsed)+'</div></div></div></div>';
+    h+='<div class="muted" style="font-size:12px;margin-top:6px">Saved '+fmtP(l,st.dep)+' · Used '+fmtP(l,st.wd+st.wishUsed)+(l.cur==="EUR"?' · ≈ '+huf(toHuf(l,st.bal)):'')+'</div></div></div></div>';
   });
   var gen=a.totalSaved;
   if(rows.length>1)h+='<div class="muted" style="font-size:12px;margin:-2px 4px 8px">Press and hold a plant, then drag it to change the order.</div>';
   h+='<button class="btn sec" data-act="newplant" style="margin-top:4px">+ New plant</button>';
+  if(!eurPot())h+='<button class="btn sec" data-act="neweur" style="margin-top:8px">+ EUR savings plant</button>';
   h+='<div class="card"><div class="row spread"><span class="muted">Saved for wishlists (not in a plant)</span><strong>'+huf(gen)+'</strong></div></div>';
   var dn=donePots();
   if(dn.length){
     h+='<div class="lsec">Finished plants</div><div class="card" style="padding:4px 16px">';
-    dn.forEach(function(l){var st=potStats(l.id,a);h+='<div class="tx" data-pot="'+l.id+'"><div class="dot">🌿</div><div class="mid"><div class="t">'+esc(l.name)+'</div><div class="s">Saved '+huf(st.dep)+' · Used '+huf(st.wd+st.wishUsed)+'</div></div><div class="a">'+huf(st.bal)+'</div></div>';});
+    dn.forEach(function(l){var st=potStats(l.id,a);h+='<div class="tx" data-pot="'+l.id+'"><div class="dot">🌿</div><div class="mid"><div class="t">'+esc(l.name)+'</div><div class="s">Saved '+fmtP(l,st.dep)+' · Used '+fmtP(l,st.wd+st.wishUsed)+'</div></div><div class="a">'+fmtP(l,st.bal)+'</div></div>';});
     h+='<div class="muted" style="font-size:12px;padding:8px 0 12px">Finished plants are hidden everywhere else. Any money left in them stays there until you bring them back.</div></div>';
   }
   return h;
 }
-function balanceChart(moves,budget){
+function balanceChart(moves,budget,fmt){fmt=fmt||huf;
   if(!moves.length)return '';
   var first=moves[0].t.date.slice(0,7),last=ym(new Date()),i;
   if(moves[moves.length-1].t.date.slice(0,7)>last)last=moves[moves.length-1].t.date.slice(0,7);
@@ -543,7 +549,7 @@ function balanceChart(moves,budget){
   var W=320,H=150,pl=26,pr=26,pt=18,pb=24,iw=W-pl-pr,ih=H-pt-pb;
   var X=function(j){return pl+(months.length===1?iw/2:iw*j/(months.length-1));},Y=function(v){return pt+ih-ih*Math.max(0,v)/max;};
   var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Balance over time"><line x1="4" x2="'+(W-4)+'" y1="'+(pt+ih)+'" y2="'+(pt+ih)+'" stroke="var(--line)"/>';
-  if(budget>0)svg+='<line x1="4" x2="'+(W-4)+'" y1="'+Y(budget)+'" y2="'+Y(budget)+'" stroke="var(--income)" stroke-dasharray="4 4"/><text x="4" y="'+(Y(budget)-5)+'" text-anchor="start">Budget '+huf(budget)+'</text>';
+  if(budget>0)svg+='<line x1="4" x2="'+(W-4)+'" y1="'+Y(budget)+'" y2="'+Y(budget)+'" stroke="var(--income)" stroke-dasharray="4 4"/><text x="4" y="'+(Y(budget)-5)+'" text-anchor="start">Budget '+fmt(budget)+'</text>';
   var pts=vals.map(function(v,j){return X(j).toFixed(1)+","+Y(v).toFixed(1);});
   if(vals.length>1)svg+='<polygon points="'+X(0).toFixed(1)+','+(pt+ih)+' '+pts.join(" ")+' '+X(vals.length-1).toFixed(1)+','+(pt+ih)+'" fill="var(--income)" opacity=".16"/><polyline points="'+pts.join(" ")+'" fill="none" stroke="var(--income)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
   vals.forEach(function(v,j){svg+='<circle cx="'+X(j).toFixed(1)+'" cy="'+Y(v).toFixed(1)+'" r="3.5" fill="var(--income)"/>';});
@@ -552,23 +558,23 @@ function balanceChart(moves,budget){
   return svg+'</svg>';
 }
 function viewPot(id,a){
-  var l=state.lists.filter(function(x){return x.id===id;})[0],st=potStats(id,a),bud=l.budget||0,pr=bud>0?st.bal/bud:0;
+  var l=state.lists.filter(function(x){return x.id===id;})[0],f=function(n){return fmtP(l,n);},st=potStats(id,a),bud=l.budget||0,pr=bud>0?st.bal/bud:0;
   var h='<button class="golink" style="margin:6px 0 0" data-potback="1">‹ All savings</button><h1 style="margin-top:6px">'+esc(l.name)+'</h1>';
-  h+='<div class="card" style="text-align:center">'+plantSvg(pr,120)+'<div class="big '+(st.bal<0?"expense":"")+'" style="font-size:30px">'+huf(st.bal)+'</div>';
-  h+='<div class="muted" style="font-size:14px;margin-top:2px">'+(bud>0?'of '+huf(bud)+' · '+(pr>=1?'in bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%'):'No budget set yet')+'</div>';
+  h+='<div class="card" style="text-align:center">'+plantSvg(pr,120)+'<div class="big '+(st.bal<0?"expense":"")+'" style="font-size:30px">'+f(st.bal)+'</div>'+(l.cur==="EUR"?'<div class="muted" style="font-size:14px">≈ '+huf(toHuf(l,st.bal))+(state.eurRate?' at '+state.eurRate+' Ft/€':'')+'</div>':'');
+  h+='<div class="muted" style="font-size:14px;margin-top:2px">'+(bud>0?'of '+f(bud)+' · '+(pr>=1?'in bloom 🌸':Math.floor(Math.min(0.99,Math.max(0,pr))*100)+'%'):'No budget set yet')+'</div>';
   if(bud>0)h+='<div class="bar" style="margin:12px 0 0"><i style="width:'+Math.min(100,Math.max(0,pr*100))+'%;background:var(--income)"></i></div>';
-  h+='<div class="grid3" style="margin-top:16px"><div><div class="v income">'+huf(st.dep)+'</div><div class="l">Saved in</div></div><div><div class="v expense">'+huf(st.wd+st.wishUsed)+'</div><div class="l">Taken out</div></div><div><div class="v">'+(bud>0?huf(Math.max(0,bud-st.bal)):"–")+'</div><div class="l">To budget</div></div></div>';
+  h+='<div class="grid3" style="margin-top:16px"><div><div class="v income">'+f(st.dep)+'</div><div class="l">Saved in</div></div><div><div class="v expense">'+f(st.wd+st.wishUsed)+'</div><div class="l">Taken out</div></div><div><div class="v">'+(bud>0?f(Math.max(0,bud-st.bal)):"–")+'</div><div class="l">To budget</div></div></div>';
   h+='<button class="btn sec" style="margin-top:14px" data-plant="'+id+'">'+(bud>0?"Change budget":"Set a budget")+'</button>';
   h+=l.done?'<button class="btn sec" style="margin-top:8px" data-act="plantrestore" data-pid="'+id+'">Bring back to the garden</button>':'<button class="btn danger" style="margin-top:8px" data-act="plantdone" data-pid="'+id+'">Finish this plant</button>';
   h+='</div>';
   var pm=plannedMoves(id),pmh='';
   if(pm.length){
     pmh='<div class="card" style="padding:4px 16px"><div class="eyebrow" style="padding:12px 0 2px">Planned</div>';
-    pm.forEach(function(x){var t=x.t,isIn=x.amt>0;pmh+='<div class="tx planned" data-edit="'+t.id+'"><div class="dot">'+(isIn?"🌱":(ICON[t.cat]||"🛍️"))+'</div><div class="mid"><div class="t">'+esc(isIn?(t.note||"Saved"):(t.place||t.note||t.cat))+'</div><div class="s">'+shortDay(t.date)+' · planned</div></div><div class="a '+(isIn?"income":"expense")+'">'+(isIn?"+":"−")+huf(Math.abs(x.amt))+'</div></div>';});
+    pm.forEach(function(x){var t=x.t,isIn=x.amt>0;pmh+='<div class="tx planned" data-edit="'+t.id+'"><div class="dot">'+(isIn?"🌱":(ICON[t.cat]||"🛍️"))+'</div><div class="mid"><div class="t">'+esc(isIn?(t.note||"Saved"):(t.place||t.note||t.cat))+'</div><div class="s">'+shortDay(t.date)+' · planned</div></div><div class="a '+(isIn?"income":"expense")+'">'+(isIn?"+":"−")+f(Math.abs(x.amt))+'</div></div>';});
     pmh+='</div>';
   }
   if(!st.moves.length)return h+pmh+'<div class="card empty">Nothing saved into this plant yet. Tap + and choose “Save for” → '+esc(l.name)+'.</div>';
-  h+='<div class="card"><div class="eyebrow" style="margin-bottom:8px">Balance over time</div>'+balanceChart(st.moves,bud)+'</div>';
+  h+='<div class="card"><div class="eyebrow" style="margin-bottom:8px">Balance over time</div>'+balanceChart(st.moves,bud,f)+'</div>';
   // month by month
   var first=st.moves[0].t.date.slice(0,7),last=ym(new Date());
   var lastMove=st.moves[st.moves.length-1].t.date.slice(0,7);if(lastMove>last)last=lastMove;
@@ -579,16 +585,16 @@ function viewPot(id,a){
     run+=inn-out;months.push({m:m,inn:inn,out:out,end:run});
   }
   h+='<div class="card"><div class="eyebrow" style="margin-bottom:4px">Month by month</div><div class="mrow mhead"><span>Month</span><span>Saved</span><span>Taken out</span><span>Balance</span></div>';
-  months.slice().reverse().forEach(function(r){h+='<div class="mrow"><span>'+shortMonth(r.m)+'</span><span class="income">'+(r.inn?'+'+huf(r.inn):'–')+'</span><span class="expense">'+(r.out?'−'+huf(r.out):'–')+'</span><span style="font-weight:600">'+huf(r.end)+'</span></div>';});
+  months.slice().reverse().forEach(function(r){h+='<div class="mrow"><span>'+shortMonth(r.m)+'</span><span class="income">'+(r.inn?'+'+f(r.inn):'–')+'</span><span class="expense">'+(r.out?'−'+f(r.out):'–')+'</span><span style="font-weight:600">'+f(r.end)+'</span></div>';});
   h+='</div>';
   h+=pmh;
   // every movement, newest first, with running balance
   var run2=0,list=st.moves.map(function(x){run2+=x.amt;return {x:x,bal:run2};}).reverse();
   h+='<div class="card" style="padding:4px 16px"><div class="eyebrow" style="padding:12px 0 2px">All movements</div>';
-  if(st.wishUsed)h+='<div class="tx"><div class="dot">🛍️</div><div class="mid"><div class="t">Bought wishlist items</div><div class="s">Funded from this plant</div></div><div class="a expense">−'+huf(st.wishUsed)+'</div></div>';
+  if(st.wishUsed)h+='<div class="tx"><div class="dot">🛍️</div><div class="mid"><div class="t">Bought wishlist items</div><div class="s">Funded from this plant</div></div><div class="a expense">−'+f(st.wishUsed)+'</div></div>';
   list.forEach(function(r){
-    var t=r.x.t,isIn=r.x.amt>0,lab=isIn?(t.note||"Saved"):(t.place||t.note||t.cat),sub=shortDay(t.date)+(isIn?"":" · "+t.cat);
-    h+='<div class="tx" data-edit="'+t.id+'"><div class="dot">'+(isIn?"🌱":(ICON[t.cat]||"🛍️"))+'</div><div class="mid"><div class="t">'+esc(lab)+'</div><div class="s">'+esc(sub)+'</div></div><div style="text-align:right"><div class="a '+(isIn?"income":"expense")+'">'+(isIn?"+":"−")+huf(Math.abs(r.x.amt))+'</div><div class="s" style="font-size:12px">balance '+huf(r.bal)+'</div></div></div>';
+    var t=r.x.t,isIn=r.x.amt>0,lab=isIn?(t.note||"Saved"):(t.place||t.note||t.cat),sub=shortDay(t.date)+(isIn?(t.rate?" · "+huf(t.amount)+" at "+t.rate:""):" · "+t.cat);
+    h+='<div class="tx" data-edit="'+t.id+'"><div class="dot">'+(isIn?"🌱":(ICON[t.cat]||"🛍️"))+'</div><div class="mid"><div class="t">'+esc(lab)+'</div><div class="s">'+esc(sub)+'</div></div><div style="text-align:right"><div class="a '+(isIn?"income":"expense")+'">'+(isIn?"+":"−")+f(Math.abs(r.x.amt))+'</div><div class="s" style="font-size:12px">balance '+f(r.bal)+'</div></div></div>';
   });
   return h+'</div>';
 }
@@ -623,6 +629,11 @@ function remainder(){
   sheet.querySelectorAll("[data-sa]").forEach(function(i){sum+=parseFloat(i.value)||0;});
   return {tot:tot,r:Math.round((tot-sum)*100)/100};
 }
+function updateEqv(){
+  var e=document.getElementById("f_eqv");if(!e)return;
+  var a=parseFloat(document.getElementById("f_amount").value)||0,r=parseFloat(document.getElementById("f_rate").value)||0;
+  e.textContent=a>0&&r>0?"= "+huf(Math.round(a*r))+" taken from your Ft income":"Enter the rate to see the Ft value.";
+}
 function updateRem(){
   var el=document.getElementById("f_rem");if(!el||!draft||!draft.splits)return;
   var x=remainder();
@@ -634,6 +645,8 @@ function updateRem(){
 var draft=null;
 function txSheet(t){
   draft=t?JSON.parse(JSON.stringify(t)):{id:null,type:"expense",amount:"",cat:"Groceries",date:today(),place:"",note:"",listId:"",fromPot:""};
+  if(t&&t.eur){draft.amount=t.eur;draft.rate=t.rate;}
+  if(!draft.rate&&state.eurRate)draft.rate=state.eurRate;
   drawTxSheet();
 }
 function drawTxSheet(){
@@ -642,7 +655,8 @@ function drawTxSheet(){
   h+='<div class="seg" id="typeSeg">';
   [["expense","Expense"],["income","Income"],["saving","Saved"]].forEach(function(p){h+='<button data-type="'+p[0]+'" class="'+(d.type===p[0]?"on":"")+'">'+p[1]+'</button>';});
   h+='</div>';
-  h+='<label>Amount (Ft)</label><input id="f_amount" type="number" inputmode="decimal" min="0" step="1" value="'+esc(d.amount)+'" placeholder="0">';
+  var isE=d.type==="saving"&&isEurId(d.listId);
+  h+='<label>Amount ('+(isE?"EUR":"Ft")+')</label><input id="f_amount" type="number" inputmode="decimal" min="0" step="1" value="'+esc(d.amount)+'" placeholder="0">';
   if(d.type==="expense"&&d.splits){
     h+='<label>Categories</label>';
     d.splits.forEach(function(s,i){h+='<div class="splitrow"><select data-sc="'+i+'">'+catOptions("expense",s.cat)+'</select><input data-sa="'+i+'" type="number" inputmode="decimal" min="0" step="1" placeholder="Ft" value="'+esc(s.amount)+'"><button class="iconbtn" data-srm="'+i+'" aria-label="Remove line">×</button></div>';});
@@ -655,22 +669,24 @@ function drawTxSheet(){
   if(d.type==="saving"){
     var opt=function(l){return '<option value="'+l.id+'"'+(d.listId===l.id?" selected":"")+'>'+esc(l.name)+'</option>';};
     h+='<label>Save for</label><select id="f_for"><option value="">Any wishlist (general)</option><optgroup label="Wishlists">'+wishLists().map(opt).join("")+'</optgroup><optgroup label="Garden">'+potsFor(d.listId).map(opt).join("")+'</optgroup></select>';
+    if(isE)h+='<label>Rate (Ft per 1 EUR)</label><input id="f_rate" type="number" inputmode="decimal" min="0" step="0.01" value="'+esc(d.rate||"")+'" placeholder="e.g. 395"><div class="muted" id="f_eqv" style="font-size:13px;margin-top:6px"></div>';
   }
-  if(d.type==="expense"&&potsFor(d.fromPot).length){
+  if(d.type==="expense"&&potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).length){
     var bal=allocate().pots;
-    h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
+    h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
   }
   h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'"><div class="muted" style="font-size:12px;margin-top:6px">A date after today makes this a plan. It doesn\'t change your current numbers until that day.</div>';
   var places=[];state.tx.forEach(function(t){if(t.place&&places.indexOf(t.place)<0)places.push(t.place);});
   h+='<label>Place (optional)</label><input id="f_place" type="text" list="f_places" autocomplete="off" value="'+esc(d.place||"")+'" placeholder="e.g. Lidl"><datalist id="f_places">'+places.sort().map(function(p){return '<option value="'+esc(p)+'">';}).join("")+'</datalist>';
   h+='<label>Note (optional)</label><input id="f_note" type="text" value="'+esc(d.note)+'" placeholder="e.g. weekly shop">';
   h+='<div class="actions">'+(d.id?'<button class="btn danger" id="f_del">Delete</button>':'')+'<button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="f_save">Save</button></div>';
-  setTimeout(updateRem,0);
+  setTimeout(updateRem,0);setTimeout(updateEqv,0);
   openSheet(h);
 }
 
 function readTxForm(){
   draft.amount=document.getElementById("f_amount").value;
+  var fr=document.getElementById("f_rate");if(fr)draft.rate=fr.value;
   var fc=document.getElementById("f_cat");if(fc)draft.cat=fc.value;
   var ff=document.getElementById("f_for");draft.listId=ff?ff.value:"";
   var fp=document.getElementById("f_from");draft.fromPot=fp?fp.value:"";
@@ -711,10 +727,11 @@ function plantSvg(p,w){
 }
 function plantSheet(id){
   var l=state.lists.filter(function(x){return x.id===id&&x.pot;})[0];if(!l)return;
-  var bal=allocate().pots[id]||0,b=l.budget||0,p=b>0?bal/b:0;
+  var f=function(n){return fmtP(l,n);},isE=l.cur==="EUR",bal=allocate().pots[id]||0,b=l.budget||0,p=b>0?bal/b:0;
   var h='<h2>'+esc(l.name)+'</h2><div style="text-align:center">'+plantSvg(p,140)+'</div>';
-  h+='<div style="text-align:center;margin-bottom:4px"><strong>'+huf(bal)+'</strong>'+(b>0?' <span class="muted">of '+huf(b)+' · '+(p>=1?'in bloom 🌸':Math.min(99,Math.floor(p*100))+'%')+'</span>':'')+'</div>';
-  h+='<label>Budget (Ft)</label><input id="pl_budget" type="number" inputmode="decimal" min="0" step="1" value="'+(b>0?b:'')+'" placeholder="e.g. 100000">';
+  h+='<div style="text-align:center;margin-bottom:4px"><strong>'+f(bal)+'</strong>'+(b>0?' <span class="muted">of '+f(b)+' · '+(p>=1?'in bloom 🌸':Math.min(99,Math.floor(p*100))+'%')+'</span>':'')+'</div>';
+  h+='<label>Budget ('+(isE?"EUR":"Ft")+')</label><input id="pl_budget" type="number" inputmode="decimal" min="0" step="1" value="'+(b>0?b:'')+'" placeholder="e.g. 100000">';
+  if(isE)h+='<label>Rate (Ft per 1 EUR)</label><input id="pl_rate" type="number" inputmode="decimal" min="0" step="0.01" value="'+(state.eurRate||"")+'" placeholder="e.g. 395"><div class="muted" style="font-size:13px;margin-top:6px">Used to show the Ft value of this plant. Each saving keeps the rate you typed when you added it.</div>';
   h+='<div class="muted" style="font-size:13px;margin-top:8px">The plant grows as the balance reaches this budget, and flowers once it is reached.</div>';
   h+='<div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="pl_save" data-pid="'+id+'">Save</button></div>';
   openSheet(h);
@@ -759,7 +776,7 @@ function delList(i){
 var fdraft=null;
 function fundSheet(id){
   if(id){var l=state.lists.filter(function(x){return x.id===id;})[0];if(!l)return;fdraft={id:id,pots:(l.pots||[]).slice()};}
-  var l2=state.lists.filter(function(x){return x.id===fdraft.id;})[0],bal=allocate().pots,pl=potLists();
+  var l2=state.lists.filter(function(x){return x.id===fdraft.id;})[0],bal=allocate().pots,pl=potLists().filter(function(x){return x.cur!=="EUR";});
   var h='<h2>Fund “'+esc(l2.name)+'” from</h2><div class="muted" style="font-size:13px;margin-bottom:6px">Money in the plants you tick counts toward this wishlist, after anything saved directly for it. A plant shared by two wishlists funds them from top to bottom.</div>';
   if(!pl.length)h+='<div class="empty">No plants yet. Add one under Manage lists.</div>';
   pl.forEach(function(p){var on=fdraft.pots.indexOf(p.id)>=0;h+='<button class="frow" data-ftog="'+p.id+'"><span>'+esc(p.name)+' <span class="muted">('+huf(bal[p.id]||0)+')</span></span><span style="color:var(--accent);font-weight:700">'+(on?"✓":"")+'</span></button>';});
@@ -824,6 +841,7 @@ app.addEventListener("click",function(e){
   if(act==="csv"){exportCsv();return;}
   if(act==="plantoggle"){state.plan=!state.plan;save();render();return;}
   if(act==="lists"){listsSheet();return;}
+  if(act==="neweur"){openSheet('<h2>EUR savings plant</h2><div class="muted" style="font-size:13px">Save in euros. Each saving is converted to Ft at the rate you type and comes out of your Ft income that month.</div><label>Name</label><input id="ne_name" type="text" maxlength="40" value="EUR savings"><label>Budget (EUR, optional)</label><input id="ne_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 1000"><label>Rate (Ft per 1 EUR)</label><input id="ne_rate" type="number" inputmode="decimal" min="0" step="0.01" value="'+(state.eurRate||"")+'" placeholder="e.g. 395"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="ne_save">Plant it</button></div>');return;}
   if(act==="newplant"){openSheet('<h2>New plant</h2><div class="muted" style="font-size:13px">A place to save for something specific, for example a wedding gift or a trip.</div><label>Name</label><input id="np_name" type="text" maxlength="40" placeholder="e.g. Wedding gift"><label>Budget (Ft, optional)</label><input id="np_budget" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 60000"><div class="actions"><button class="btn sec" id="f_cancel">Cancel</button><button class="btn" id="np_save">Plant it</button></div>');return;}
   if(act==="plantdone"){var dl=state.lists.filter(function(x){return x.id===t.dataset.pid;})[0];if(!dl)return;
     var bl=allocate().pots[dl.id]||0;
@@ -901,6 +919,11 @@ sheet.addEventListener("click",function(e){
       else if(merged.length===1){rcat=merged[0].cat;}
     }
     var rec={id:draft.id||uid(),type:draft.type,amount:amt,cat:rcat,date:draft.date,place:draft.place,note:draft.note};
+    if(draft.type==="saving"&&isEurId(draft.listId)){
+      var rt=parseFloat(draft.rate);
+      if(!(rt>0)){alert("Enter the rate (Ft per 1 EUR).");return;}
+      rec.eur=amt;rec.rate=rt;rec.amount=Math.round(amt*rt);state.eurRate=rt;
+    }
     if(splits)rec.splits=splits;
     if(draft.type==="saving"&&draft.listId)rec.listId=draft.listId;
     if(draft.type==="expense"&&draft.fromPot)rec.fromPot=draft.fromPot;
@@ -918,12 +941,20 @@ sheet.addEventListener("click",function(e){
   if(b.dataset.ldel!==undefined){delList(+b.dataset.ldel);return;}
   if(b.dataset.ftog){var fi=fdraft.pots.indexOf(b.dataset.ftog);if(fi<0)fdraft.pots.push(b.dataset.ftog);else fdraft.pots.splice(fi,1);fundSheet(null);return;}
   if(b.id==="f_fsave"){var fl2=state.lists.filter(function(x){return x.id===fdraft.id;})[0];if(fl2){fl2.pots=fdraft.pots;save();}closeSheet();return;}
+  if(b.id==="ne_save"){
+    var en=document.getElementById("ne_name").value.trim(),er=parseFloat(document.getElementById("ne_rate").value);
+    if(!en){alert("Give the plant a name.");return;}
+    if(!(er>0)){alert("Enter the rate (Ft per 1 EUR).");return;}
+    if(eurPot()){closeSheet();return;}
+    var ne={id:uid(),name:en.slice(0,40),pot:true,cur:"EUR",budget:Math.max(0,parseFloat(document.getElementById("ne_budget").value)||0)};
+    state.eurRate=er;state.lists.push(ne);save();closeSheet();ui.pot=ne.id;ui.tab="savings";render();window.scrollTo(0,0);return;
+  }
   if(b.id==="np_save"){
     var nm=document.getElementById("np_name").value.trim();if(!nm){alert("Give the plant a name.");return;}
     var nb=Math.max(0,parseFloat(document.getElementById("np_budget").value)||0),np={id:uid(),name:nm.slice(0,40),pot:true,budget:nb};
     state.lists.push(np);save();closeSheet();ui.pot=np.id;render();window.scrollTo(0,0);return;
   }
-  if(b.id==="pl_save"){var pl0=state.lists.filter(function(x){return x.id===b.dataset.pid;})[0];if(pl0){pl0.budget=Math.max(0,parseFloat(document.getElementById("pl_budget").value)||0);save();}closeSheet();return;}
+  if(b.id==="pl_save"){var pl0=state.lists.filter(function(x){return x.id===b.dataset.pid;})[0];if(pl0){pl0.budget=Math.max(0,parseFloat(document.getElementById("pl_budget").value)||0);var prE=document.getElementById("pl_rate");if(prE&&parseFloat(prE.value)>0)state.eurRate=parseFloat(prE.value);save();}closeSheet();return;}
   if(b.id==="p_add"){var pi=document.getElementById("p_new"),pn=pi.value.trim();if(!pn)return;state.lists.push({id:uid(),name:pn.slice(0,40),pot:true});save();listsSheet();return;}
   if(b.id==="l_add"){var ni=document.getElementById("l_new"),nm=ni.value.trim();if(!nm)return;state.lists.push({id:uid(),name:nm.slice(0,40)});save();listsSheet();return;}
   if(b.id==="wl_go"){if(importWishlist(document.getElementById("wl_text").value))closeSheet();return;}
@@ -946,8 +977,10 @@ sheet.addEventListener("click",function(e){
 });
 sheet.addEventListener("input",function(e){
   if(e.target.id==="f_amount"||e.target.dataset.sa!==undefined)updateRem();
+  if(e.target.id==="f_amount"||e.target.id==="f_rate")updateEqv();
 });
 sheet.addEventListener("change",function(e){
+  if(e.target.id==="f_for"){var wasE=isEurId(draft.listId);readTxForm();if(wasE!==isEurId(draft.listId)){drawTxSheet();}return;}
   if(e.target.dataset.ln!==undefined){var idx=+e.target.dataset.ln,v=e.target.value.trim();if(v){state.lists[idx].name=v.slice(0,40);save();}else e.target.value=state.lists[idx].name;return;}
   if(e.target.id==="g_file"&&e.target.files[0]){
     resizeImage(e.target.files[0],function(url){
@@ -1014,8 +1047,8 @@ function download(name,content,type){
   setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1000);
 }
 function exportCsv(){
-  var rows=[["date","type","category","amount_huf","place","note","planned"]];
-  state.tx.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(t){lines(t).forEach(function(l){rows.push([t.date,t.type,l.cat,l.amount,t.place||"",t.note||"",isPlanned(t)?"yes":"no"]);});});
+  var rows=[["date","type","category","amount_huf","eur","rate","place","note","planned"]];
+  state.tx.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(t){lines(t).forEach(function(l){rows.push([t.date,t.type,l.cat,l.amount,t.eur||"",t.rate||"",t.place||"",t.note||"",isPlanned(t)?"yes":"no"]);});});
   var csv=rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(",");}).join("\n");
   download("money-transactions-"+today()+".csv","\ufeff"+csv,"text/csv");
 }
