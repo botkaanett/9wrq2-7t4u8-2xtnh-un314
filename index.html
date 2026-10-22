@@ -139,7 +139,7 @@ var ICON={};
 Object.keys(CATS).forEach(function(k){CATS[k].forEach(function(c){ICON[c[1]]=c[0];});});
 
 var state={tx:[],goals:[],lists:[]};
-var ui={tab:"overview",month:ym(new Date()),catFilter:null,gl:"all",pot:null,noClick:0};
+var ui={tab:"overview",month:ym(new Date()),catFilter:null,txView:"date",gl:"all",pot:null,noClick:0};
 
 // Storage: IndexedDB (hundreds of MB, survives reloads) with the old localStorage copy as the fallback and the migration source.
 var idbRef=null,writeChain=Promise.resolve(),lastToast=0;
@@ -395,13 +395,48 @@ function trendSvg(){
   return svg+'</svg>';
 }
 
+function txRow(t,cf,showDate){
+  var h="";
+  var sign=t.type==="income"?"+":t.type==="expense"?"−":"";
+    var isSplit=t.splits&&t.splits.length>1,amt=t.amount,sub=t.cat,ico=ICON[t.cat]||"📦",ttl=t.place||t.note||t.cat,lst=(t.type==="saving"&&t.listId)?listName(t.listId):"",frm=(t.type==="expense"&&t.fromPot)?listName(t.fromPot):"";
+    if(isSplit){
+      sub=t.splits.map(function(l){return l.cat;}).join(" · ");ico="🧾";ttl=t.place||t.note||"Split receipt";
+      if(cf){amt=0;t.splits.forEach(function(l){if(l.cat===cf)amt+=l.amount;});sub="of "+huf(t.amount)+" receipt · "+sub;}
+    }
+    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((showDate?shortDay(t.date)+" · ":"")+(isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm+", not in monthly budget":"")+(t.place&&t.note?" · "+t.note:"")+(t.eur?" · "+eur(t.eur)+" at "+t.rate:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
+  return h;
+}
 function viewTx(){
   var list=txIn(ui.month).slice().sort(function(a,b){return a.date<b.date?1:a.date>b.date?-1:(a.id<b.id?1:-1);});
-  var cf=ui.catFilter;
+  var cf=ui.catFilter,byCat=ui.txView==="cat"&&!cf;
   if(cf)list=list.filter(function(t){return t.type==="expense"&&lines(t).some(function(l){return l.cat===cf;});});
   var h='<div class="eyebrow">Activity</div><h1>Transactions</h1>'+monthBar();
+  if(!cf)h+='<div class="seg" style="margin-bottom:12px"><button data-txview="date" class="'+(byCat?"":"on")+'">By date</button><button data-txview="cat" class="'+(byCat?"on":"")+'">By category</button></div>';
   if(cf){var ct=0;list.forEach(function(t){lines(t).forEach(function(l){if(l.cat===cf)ct+=l.amount;});});h+='<div class="card"><div class="row spread"><div><div class="muted" style="font-size:13px">Showing only</div><strong>'+(ICON[cf]||"")+' '+esc(cf)+'</strong> · '+huf(ct)+'</div><button class="btn sec" style="width:auto" data-clearcat="1">Show all</button></div></div>';}
   if(!list.length)return h+'<div class="card empty">Nothing here yet. Tap + to add a transaction.</div>';
+  if(byCat){
+    var groups={},order=[];
+    list.forEach(function(t){
+      var seen={};
+      lines(t).forEach(function(l){
+        var key=t.type+"|"+l.cat;
+        if(!groups[key]){groups[key]={type:t.type,cat:l.cat,tot:0,items:[]};order.push(key);}
+        if(!(t.type==="expense"&&t.fromPot))groups[key].tot+=l.amount;
+        if(!seen[key]){seen[key]=1;groups[key].items.push(t);}
+      });
+    });
+    var rank={expense:0,income:1,saving:2},names={expense:"Spent",income:"Income",saving:"Saved"};
+    order.sort(function(x,y){var gx=groups[x],gy=groups[y];return rank[gx.type]-rank[gy.type]||gy.tot-gx.tot;});
+    var lastType="";
+    order.forEach(function(k){
+      var g=groups[k];
+      if(g.type!==lastType){h+='<div class="lsec">'+names[g.type]+'</div>';lastType=g.type;}
+      h+='<div class="row spread" style="margin:14px 4px 6px"><strong>'+(ICON[g.cat]||"📦")+' '+esc(g.cat)+' <span class="muted" style="font-weight:400">· '+g.items.length+'</span></strong><strong>'+huf(g.tot)+'</strong></div><div class="card" style="margin-top:0;padding:4px 16px">';
+      g.items.forEach(function(t){h+=txRow(t,g.type==="expense"?g.cat:null,true);});
+      h+='</div>';
+    });
+    return h;
+  }
   var last="";
   var open=false;
   list.forEach(function(t){
@@ -410,13 +445,7 @@ function viewTx(){
       h+='<div class="day">'+dayLabel(t.date)+(isPlanned(t)?' · planned':'')+'</div><div class="card" style="margin-top:6px;padding:4px 16px">';
       open=true;last=t.date;
     }
-    var sign=t.type==="income"?"+":t.type==="expense"?"−":"";
-    var isSplit=t.splits&&t.splits.length>1,amt=t.amount,sub=t.cat,ico=ICON[t.cat]||"📦",ttl=t.place||t.note||t.cat,lst=(t.type==="saving"&&t.listId)?listName(t.listId):"",frm=(t.type==="expense"&&t.fromPot)?listName(t.fromPot):"";
-    if(isSplit){
-      sub=t.splits.map(function(l){return l.cat;}).join(" · ");ico="🧾";ttl=t.place||t.note||"Split receipt";
-      if(cf){amt=0;t.splits.forEach(function(l){if(l.cat===cf)amt+=l.amount;});sub="of "+huf(t.amount)+" receipt · "+sub;}
-    }
-    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm+", not in monthly budget":"")+(t.place&&t.note?" · "+t.note:"")+(t.eur?" · "+eur(t.eur)+" at "+t.rate:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
+    h+=txRow(t,cf);
   });
   if(open)h+='</div>';
   return h;
@@ -827,10 +856,11 @@ document.getElementById("fab").addEventListener("click",function(){
 
 app.addEventListener("click",function(e){
   if(Date.now()<ui.noClick){e.preventDefault();return;}
-  var t=e.target.closest("[data-act],[data-edit],[data-editgoal],[data-up],[data-down],[data-buy],[data-cat],[data-clearcat],[data-gl],[data-lfund],[data-plant],[data-pot],[data-potback]");
+  var t=e.target.closest("[data-act],[data-edit],[data-editgoal],[data-up],[data-down],[data-buy],[data-cat],[data-clearcat],[data-txview],[data-gl],[data-lfund],[data-plant],[data-pot],[data-potback]");
   if(!t||e.target.closest("a"))return;
   var act=t.dataset.act;
   if(t.dataset.cat){ui.catFilter=t.dataset.cat;ui.tab="tx";render();window.scrollTo(0,0);return;}
+  if(t.dataset.txview){ui.txView=t.dataset.txview;render();return;}
   if(t.dataset.clearcat){ui.catFilter=null;render();return;}
   if(t.dataset.gl){ui.gl=t.dataset.gl;render();return;}
   if(t.dataset.lfund){fundSheet(t.dataset.lfund);return;}
