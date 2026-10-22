@@ -182,7 +182,7 @@ function eur(n){return (Math.round(n*100)/100).toLocaleString("hu-HU",{maximumFr
 function isEurId(id){var l=state.lists.filter(function(x){return x.id===id;})[0];return !!(l&&l.cur==="EUR");}
 function fmtP(l,n){return l&&l.cur==="EUR"?eur(n):huf(n);}
 function toHuf(l,n){return l&&l.cur==="EUR"?n*(state.eurRate||0):n;}
-function eurPot(){return state.lists.filter(function(l){return l.pot&&l.cur==="EUR";})[0];}
+function eurPot(){return state.lists.filter(function(l){return l.pot&&l.cur==="EUR"&&!l.done;})[0];}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function monthLabel(m){var p=m.split("-");return new Date(+p[0],+p[1]-1,1).toLocaleDateString("en-GB",{month:"long",year:"numeric"});}
 function shiftMonth(m,d){var p=m.split("-");return ym(new Date(+p[0],+p[1]-1+d,1));}
@@ -191,7 +191,7 @@ function dayLabel(s){var p=s.split("-");return new Date(+p[0],+p[1]-1,+p[2]).toL
 /* ---------- calculations ---------- */
 function sums(list){
   var r={income:0,expense:0,saving:0};
-  list.forEach(function(t){r[t.type]+=t.amount;});
+  list.forEach(function(t){if(t.type==="expense"&&t.fromPot)return;r[t.type]+=t.amount;});
   return r;
 }
 function txIn(m){return state.tx.filter(function(t){return t.date.slice(0,7)===m;});}
@@ -343,7 +343,7 @@ function viewOverview(){
   h+='<div class="card"><div class="eyebrow" style="margin-bottom:8px">Last 6 months</div>'+trendSvg()+'<div class="legend"><span><i style="background:var(--income)"></i>Income</span><span><i style="background:var(--expense)"></i>Spent</span><span><i style="background:var(--saving)"></i>Saved</span></div></div>';
 
   // categories
-  var cats={};list.filter(function(t){return t.type==="expense";}).forEach(function(t){lines(t).forEach(function(l){cats[l.cat]=(cats[l.cat]||0)+l.amount;});});
+  var cats={};list.filter(function(t){return t.type==="expense"&&!t.fromPot;}).forEach(function(t){lines(t).forEach(function(l){cats[l.cat]=(cats[l.cat]||0)+l.amount;});});
   var keys=Object.keys(cats).sort(function(a,b){return cats[b]-cats[a];});
   h+='<div class="card"><div class="eyebrow">Spending by category</div>';
   if(!keys.length)h+='<div class="empty">No spending this month</div>';
@@ -416,7 +416,7 @@ function viewTx(){
       sub=t.splits.map(function(l){return l.cat;}).join(" · ");ico="🧾";ttl=t.place||t.note||"Split receipt";
       if(cf){amt=0;t.splits.forEach(function(l){if(l.cat===cf)amt+=l.amount;});sub="of "+huf(t.amount)+" receipt · "+sub;}
     }
-    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm:"")+(t.place&&t.note?" · "+t.note:"")+(t.eur?" · "+eur(t.eur)+" at "+t.rate:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
+    h+='<div class="tx'+(isPlanned(t)?' planned':'')+'" data-edit="'+t.id+'"><div class="dot">'+ico+'</div><div class="mid"><div class="t">'+esc(ttl)+'</div><div class="s">'+esc((isPlanned(t)?"Planned · ":"")+sub+(lst?" → "+lst:"")+(frm?" · from "+frm+", not in monthly budget":"")+(t.place&&t.note?" · "+t.note:"")+(t.eur?" · "+eur(t.eur)+" at "+t.rate:""))+'</div></div><div class="a '+t.type+'">'+sign+huf(amt)+'</div></div>';
   });
   if(open)h+='</div>';
   return h;
@@ -608,7 +608,7 @@ function viewMore(){
   h+='<button class="btn sec" data-act="restore">Restore from backup</button><input type="file" id="restoreFile" accept="application/json,.json" class="hidden"></div>';
   h+='<div class="card"><div class="eyebrow">Wishlist import</div><div class="muted" style="font-size:14px;margin:6px 0 12px">Add several wishlist items at once from the JSON an AI filled in for you (name, price, photo, link). Items already on your wishlist with the same link are skipped.</div>';
   h+='<button class="btn" data-act="wl-paste">Paste JSON</button><div style="height:8px"></div><button class="btn sec" data-act="wl-file">Choose JSON file</button><input type="file" id="wlFile" accept="application/json,.json,.txt" class="hidden"></div>';
-  h+='<div class="card"><div class="muted" style="font-size:13px">'+state.tx.length+' transactions · '+state.goals.length+' wishlist items</div></div>';
+  h+='<div class="card"><div class="muted" style="font-size:13px">'+state.tx.length+' transactions · '+state.goals.length+' wishlist items · version 22 Oct (EUR, decimal comma)</div></div>';
   return h;
 }
 
@@ -674,7 +674,7 @@ function drawTxSheet(){
   }
   if(d.type==="expense"&&potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).length){
     var bal=allocate().pots;
-    h+='<label>Paid from your garden (optional)</label><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
+    h+='<label>Paid from your garden (optional)</label><div class="muted" style="font-size:12px;margin:-2px 0 6px">Leaves your monthly budget alone and only reduces the plant.</div><select id="f_from"><option value="">Not from the garden</option>'+potsFor(d.fromPot).filter(function(x){return x.cur!=="EUR";}).map(function(l){return '<option value="'+l.id+'"'+(d.fromPot===l.id?" selected":"")+'>'+esc(l.name)+' ('+huf(bal[l.id]||0)+')</option>';}).join("")+'</select>';
   }
   h+='<label>Date</label><input id="f_date" type="date" value="'+d.date+'"><div class="muted" style="font-size:12px;margin-top:6px">A date after today makes this a plan. It doesn\'t change your current numbers until that day.</div>';
   var places=[];state.tx.forEach(function(t){if(t.place&&places.indexOf(t.place)<0)places.push(t.place);});
